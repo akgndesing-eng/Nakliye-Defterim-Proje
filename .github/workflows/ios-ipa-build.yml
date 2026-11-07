@@ -8,15 +8,15 @@ on:
 jobs:
   build-ios-ipa:
     name: macOS Xcode ile .ipa Derle
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - name: Proje Dosyalarini Cek
         uses: actions/checkout@v4
 
-      - name: Node.js 20 Kurulumu
+      - name: Node.js 22 LTS Kurulumu
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Paketleri Yukle ve Uygulamayi Derle
         run: |
@@ -30,6 +30,7 @@ jobs:
           xcodebuild -project App.xcodeproj \
             -scheme App \
             -configuration Release \
+            -sdk iphoneos \
             -destination "generic/platform=iOS" \
             -archivePath $RUNNER_TEMP/NakliyeDefterim.xcarchive \
             archive \
