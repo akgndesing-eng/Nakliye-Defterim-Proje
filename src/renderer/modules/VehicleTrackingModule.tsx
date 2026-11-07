@@ -8,27 +8,29 @@ import {
   Radio,
   RefreshCw,
   Settings,
-  ExternalLink,
   Phone,
   MessageSquare,
   MapPin,
-  ShieldCheck,
   Clock,
   Activity,
-  CheckCircle2,
-  AlertTriangle,
   Search,
-  Sliders,
   Compass,
   Play,
   Pause,
   Edit3,
   X,
   KeyRound,
-  Layers,
   Route,
   BatteryCharging,
-  Thermometer
+  Thermometer,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Layers,
+  Award,
+  CheckCircle2,
+  ShieldCheck,
+  History
 } from 'lucide-react';
 import { Vehicle, Driver, Trip, NavTabId } from '../../shared/types';
 import { api } from '../api';
@@ -41,6 +43,8 @@ interface VehicleTrackingModuleProps {
 export type TrackingProvider = 'both' | 'mobiliz' | 'renault';
 export type IgnitionState = 'moving' | 'idle' | 'stopped';
 export type TachoState = 'driving' | 'rest' | 'work';
+export type InAppPortalView = 'unified' | 'mobiliz_panel' | 'renault_panel';
+export type MapLayerStyle = 'street' | 'satellite' | 'radar';
 
 export interface VehicleTelemetryOverride {
   provider: TrackingProvider;
@@ -63,6 +67,7 @@ export interface VehicleTelemetryOverride {
   dailyDistanceKm: number;
   idleMinutes: number;
   satellites: number;
+  ecoScore: number;
   updatedAt: string;
 }
 
@@ -152,6 +157,18 @@ function normalizePlate(p: string): string {
   return (p || '').replace(/\s+/g, '').toUpperCase();
 }
 
+// Web Mercator slippy map math for real street & satellite tiles inside the app
+function lngToTileX(lng: number, zoom: number): number {
+  return ((lng + 180) / 360) * Math.pow(2, zoom);
+}
+
+function latToTileY(lat: number, zoom: number): number {
+  const rad = (lat * Math.PI) / 180;
+  return (
+    ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * Math.pow(2, zoom)
+  );
+}
+
 export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ onNavigate }) => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -163,12 +180,21 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
   );
   const [apiStatusText, setApiStatusText] = useState<string>('Mobiliz & Renault Optifleet Aktif');
 
+  // Top-level In-App View Switcher (Everything opens inside the app!)
+  const [activePortalView, setActivePortalView] = useState<InAppPortalView>('unified');
+  const [mapLayerStyle, setMapLayerStyle] = useState<MapLayerStyle>('satellite');
+  const [mapZoom, setMapZoom] = useState<number>(8);
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({
+    lat: 41.18,
+    lng: 27.95
+  });
+  const [focusedOnSingle, setFocusedOnSingle] = useState<boolean>(false);
+
   // Filter & Selection States
   const [providerFilter, setProviderFilter] = useState<'all' | 'mobiliz' | 'renault'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | IgnitionState>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
-  const [mapViewMode, setMapViewMode] = useState<'corridor' | 'satellite'>('corridor');
   const [liveSimActive, setLiveSimActive] = useState<boolean>(true);
 
   // Modals
@@ -193,7 +219,6 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
     return {};
   });
 
-  // Edit Form State
   const [editForm, setEditForm] = useState<VehicleTelemetryOverride | null>(null);
 
   const saveOverrides = useCallback((next: Record<string, VehicleTelemetryOverride>) => {
@@ -249,7 +274,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
         next[v.id] = {
           provider,
           ignition: isMoving ? 'moving' : isIdle ? 'idle' : 'stopped',
-          speedKmh: isMoving ? 74 + ((idx * 7) % 16) : 0,
+          speedKmh: isMoving ? 76 + ((idx * 7) % 14) : 0,
           lat: wp.lat,
           lng: wp.lng,
           heading: wp.heading,
@@ -260,7 +285,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
           fuelPercent: Math.max(28, 86 - ((idx * 13) % 52)),
           adBluePercent: Math.max(35, 92 - ((idx * 11) % 45)),
           odometerKm: 342500 + idx * 48210,
-          avgConsumption: 29.8 + (idx % 4) * 0.9,
+          avgConsumption: 29.4 + (idx % 4) * 0.8,
           engineRpm: isMoving ? 1240 + (idx % 3) * 45 : isIdle ? 650 : 0,
           engineTempC: isMoving ? 88 : isIdle ? 79 : 34,
           batteryVolts: isMoving || isIdle ? 28.1 : 25.4,
@@ -269,12 +294,16 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
           dailyDistanceKm: isMoving ? 285 + idx * 42 : 110 + idx * 18,
           idleMinutes: 12 + idx * 5,
           satellites: 11 + (idx % 4),
+          ecoScore: Number((8.8 + (idx % 3) * 0.4).toFixed(1)),
           updatedAt: new Date().toLocaleTimeString('tr-TR', {
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit'
           })
         };
+      } else if (next[v.id].ecoScore === undefined) {
+        changed = true;
+        next[v.id].ecoScore = 9.2;
       }
     });
 
@@ -340,15 +369,14 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
               }
             });
           }
-        } catch {
-          // Fallback silently to local live telemetry state if offline or CORS restricted
-        }
+        } catch {}
       }
 
       // 2. Try Renault Optifleet rFMS API (if credentials provided)
       if (config.renaultEnabled && config.renaultUsername.trim() && config.renaultPassword.trim()) {
         try {
-          const authHeader = 'Basic ' + btoa(`${config.renaultUsername.trim()}:${config.renaultPassword.trim()}`);
+          const authHeader =
+            'Basic ' + btoa(`${config.renaultUsername.trim()}:${config.renaultPassword.trim()}`);
           const res = await fetch(config.renaultEndpoint, {
             method: 'GET',
             headers: {
@@ -390,23 +418,20 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
               }
             });
           }
-        } catch {
-          // Fallback silently
-        }
+        } catch {}
       }
 
-      // 3. Update subtle live telemetry micro-fluctuations for moving trucks so dashboard stays dynamic
+      // 3. Update live highway movement
       if (liveSimActive) {
         Object.keys(nextOverrides).forEach((vId, idx) => {
           const cur = nextOverrides[vId];
           if (cur.ignition === 'moving') {
             const deltaSpeed = ((idx + new Date().getSeconds()) % 5) - 2;
-            const nextSpeed = Math.max(62, Math.min(90, cur.speedKmh + deltaSpeed));
+            const nextSpeed = Math.max(64, Math.min(90, cur.speedKmh + deltaSpeed));
             const rad = (cur.heading * Math.PI) / 180;
-            const step = 0.0018;
-            let nextLat = cur.lat + Math.cos(rad) * step * 0.4;
-            let nextLng = cur.lng + Math.sin(rad) * step;
-            // Keep inside Marmara/Trakya corridor bounds
+            const step = 0.0016;
+            const nextLat = cur.lat + Math.cos(rad) * step * 0.4;
+            const nextLng = cur.lng + Math.sin(rad) * step;
             if (nextLng > 29.85 || nextLng < 26.35) {
               cur.heading = (cur.heading + 180) % 360;
             } else {
@@ -426,14 +451,14 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
       if (updatedFromApi > 0) {
         setApiStatusText(`Canlı API Senkronize (${updatedFromApi} Araç)`);
       } else {
-        setApiStatusText('Mobiliz & Renault Optifleet Telemetri Aktif');
+        setApiStatusText('Mobiliz & Renault Optifleet Canlı Akış');
       }
-      setTimeout(() => setSyncingApi(false), 320);
+      setTimeout(() => setSyncingApi(false), 260);
 
       if (manual) {
         await alertDialog(
-          'Tüm araçların Mobiliz GPS konumları ve Renault Optifleet CAN-Bus (Yakıt, AdBlue, Takograf KM ve Hız) verileri güncellendi.',
-          'Canlı Konum & Telemetri Senkronize Edildi'
+          'Tüm araçların Mobiliz GPS konumları ve Renault Optifleet CAN-Bus (Yakıt, AdBlue, Takograf KM ve Hız) verileri uygulama içinde güncellendi.',
+          'Canlı Konum & Telemetri Güncellendi'
         );
       }
     },
@@ -443,7 +468,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
   // Periodic live refresh
   useEffect(() => {
     if (!liveSimActive) return;
-    const sec = Math.max(5, config.autoRefreshSec || 10);
+    const sec = Math.max(4, config.autoRefreshSec || 10);
     const timer = setInterval(() => {
       syncLiveTelematics(false);
     }, sec * 1000);
@@ -474,6 +499,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
         dailyDistanceKm: 312,
         idleMinutes: 14,
         satellites: 12,
+        ecoScore: 9.2,
         updatedAt: lastSyncTime
       };
 
@@ -540,6 +566,28 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
     );
   }, [enrichedFleet, filteredFleet, selectedVehicleId]);
 
+  // Focus map on vehicle when user clicks a vehicle
+  const handleFocusVehicle = useCallback(
+    (vehicleId: string, zoomIn = true) => {
+      setSelectedVehicleId(vehicleId);
+      const found = enrichedFleet.find((f) => f.vehicle.id === vehicleId);
+      if (found) {
+        setMapCenter({ lat: found.tele.lat, lng: found.tele.lng });
+        if (zoomIn) {
+          setMapZoom(12);
+          setFocusedOnSingle(true);
+        }
+      }
+    },
+    [enrichedFleet]
+  );
+
+  const handleShowAllFleetOnMap = useCallback(() => {
+    setMapCenter({ lat: 41.18, lng: 27.95 });
+    setMapZoom(8);
+    setFocusedOnSingle(false);
+  }, []);
+
   const kpiStats = useMemo(() => {
     const total = enrichedFleet.length;
     const moving = enrichedFleet.filter((f) => f.tele.ignition === 'moving').length;
@@ -554,19 +602,53 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
     return { total, moving, idle, stopped, mobilizCount, renaultCount };
   }, [enrichedFleet]);
 
-  // Convert GPS lat/lng in Trakya-Marmara corridor (lat 40.5..41.9, lng 26.2..30.1) to SVG radar coordinates (0..800, 0..420)
-  const projectToRadar = (lat: number, lng: number) => {
-    const minLat = 40.55;
-    const maxLat = 41.85;
-    const minLng = 26.2;
-    const maxLng = 30.05;
-    const normX = Math.max(0.06, Math.min(0.94, (lng - minLng) / (maxLng - minLng)));
-    const normY = Math.max(0.08, Math.min(0.92, 1 - (lat - minLat) / (maxLat - minLat)));
-    return {
-      x: Math.round(normX * 800),
-      y: Math.round(normY * 420)
+  // Compute real map tiles (Street or Satellite) and exact pixel coordinates for all vehicles inside the 800x440 viewport
+  const mapViewportWidth = 800;
+  const mapViewportHeight = 440;
+
+  const tileLayerData = useMemo(() => {
+    const centerTileX = lngToTileX(mapCenter.lng, mapZoom);
+    const centerTileY = latToTileY(mapCenter.lat, mapZoom);
+    const baseTileX = Math.floor(centerTileX);
+    const baseTileY = Math.floor(centerTileY);
+    const offsetX = (centerTileX - baseTileX) * 256;
+    const offsetY = (centerTileY - baseTileY) * 256;
+
+    const tiles: { key: string; url: string; left: number; top: number }[] = [];
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        const tx = baseTileX + dx;
+        const ty = baseTileY + dy;
+        const maxTile = Math.pow(2, mapZoom);
+        if (ty < 0 || ty >= maxTile) continue;
+        const wrappedTx = ((tx % maxTile) + maxTile) % maxTile;
+        const left = Math.round(mapViewportWidth / 2 - offsetX + dx * 256);
+        const top = Math.round(mapViewportHeight / 2 - offsetY + dy * 256);
+
+        const url =
+          mapLayerStyle === 'satellite'
+            ? `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${mapZoom}/${ty}/${wrappedTx}`
+            : `https://tile.openstreetmap.org/${mapZoom}/${wrappedTx}/${ty}.png`;
+
+        tiles.push({
+          key: `${mapZoom}-${wrappedTx}-${ty}`,
+          url,
+          left,
+          top
+        });
+      }
+    }
+
+    const projectLatLng = (lat: number, lng: number) => {
+      const tx = lngToTileX(lng, mapZoom);
+      const ty = latToTileY(lat, mapZoom);
+      const x = mapViewportWidth / 2 + (tx - centerTileX) * 256;
+      const y = mapViewportHeight / 2 + (ty - centerTileY) * 256;
+      return { x, y };
     };
-  };
+
+    return { tiles, projectLatLng };
+  }, [mapCenter, mapZoom, mapLayerStyle]);
 
   const handleOpenEditModal = () => {
     if (!selectedItem) return;
@@ -589,6 +671,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
       }
     };
     saveOverrides(next);
+    setMapCenter({ lat: editForm.lat, lng: editForm.lng });
     setEditModalOpen(false);
   };
 
@@ -610,23 +693,23 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
   }
 
   return (
-    <div className="p-3 sm:p-5 md:p-6 space-y-5 max-w-[1640px] mx-auto">
-      {/* TOP BAR: STATUS + PROVIDER BADGES + QUICK ACTIONS */}
-      <div className="nd-card p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+    <div className="p-3 sm:p-5 md:p-6 space-y-4 max-w-[1640px] mx-auto">
+      {/* TOP BAR: IN-APP PORTAL SWITCHER (NO EXTERNAL LINKS!) */}
+      <div className="nd-card p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3.5">
           <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-md"
+            className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-md"
             style={{
               background: 'linear-gradient(135deg, #2D6E55 0%, #1B4333 100%)',
               border: '1px solid rgba(222, 195, 143, 0.45)'
             }}
           >
-            <LocateFixed size={24} className="text-amber-200 animate-pulse" />
+            <LocateFixed size={22} className="text-amber-200 animate-pulse" />
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base sm:text-lg font-extrabold tracking-tight">
-                Canlı Araç Takip & Telemetri Merkezi
+                Canlı Araç Takip & Telemetri Ekranı
               </h2>
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold nd-badge-green flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -636,49 +719,79 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                 Son Sinyal: {lastSyncTime}
               </span>
             </div>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              <strong>Mobiliz Araç Takip</strong> (GPS Konum & Hız) ve{' '}
-              <strong>Renault Trucks Optifleet</strong> (Aracın Kendi CAN-Bus Yakıt, AdBlue, Takograf & KM Sistemi) tek ekranda birleştirildi.
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              Tüm araçların <strong>Mobiliz GPS</strong> konumları ve{' '}
+              <strong>Renault Optifleet (Aracın Kendi Sistemi)</strong> yakıt, AdBlue, takograf ve KM verileri doğrudan bu ekranda çalışır.
             </p>
           </div>
         </div>
 
+        {/* IN-APP MODE TABS + CONTROLS */}
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center p-1 rounded-xl nd-layer gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setActivePortalView('unified');
+                setProviderFilter('all');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+                activePortalView === 'unified' ? 'nd-btn-primary shadow-xs' : 'opacity-80 hover:opacity-100'
+              }`}
+            >
+              <Compass size={14} />
+              <span>Canlı Harita & Tüm Filo</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActivePortalView('mobiliz_panel');
+                setProviderFilter('mobiliz');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+                activePortalView === 'mobiliz_panel'
+                  ? 'nd-btn-primary shadow-xs'
+                  : 'opacity-80 hover:opacity-100'
+              }`}
+            >
+              <Radio size={14} style={{ color: 'var(--champagne)' }} />
+              <span>Mobiliz Ekranı ({kpiStats.mobilizCount})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActivePortalView('renault_panel');
+                setProviderFilter('renault');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+                activePortalView === 'renault_panel'
+                  ? 'nd-btn-primary shadow-xs'
+                  : 'opacity-80 hover:opacity-100'
+              }`}
+            >
+              <Activity size={14} style={{ color: 'var(--green)' }} />
+              <span>Renault Optifleet Ekranı ({kpiStats.renaultCount})</span>
+            </button>
+          </div>
+
           <button
             type="button"
             onClick={() => syncLiveTelematics(true)}
-            className="nd-btn nd-btn-primary px-3.5 py-2 text-xs flex items-center gap-1.5"
+            className="nd-btn nd-btn-secondary px-3 py-2 text-xs flex items-center gap-1.5"
           >
             <RefreshCw size={14} className={syncingApi ? 'animate-spin' : ''} />
-            <span>Şimdi Yenile</span>
+            <span>Yenile</span>
           </button>
 
           <button
             type="button"
             onClick={() => setLiveSimActive((prev) => !prev)}
             className="nd-btn nd-btn-secondary px-3 py-2 text-xs flex items-center gap-1.5"
-            title="Canlı Otoyol Akışını Duraklat / Başlat"
           >
             {liveSimActive ? <Pause size={14} /> : <Play size={14} />}
-            <span>{liveSimActive ? 'Canlı Akış: Açık' : 'Canlı Akış: Duraklatıldı'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => api.openExternal(config.mobilizUrl || 'https://ng.mobiliz.com.tr')}
-            className="nd-btn nd-btn-secondary px-3 py-2 text-xs flex items-center gap-1.5"
-          >
-            <ExternalLink size={14} style={{ color: 'var(--champagne)' }} />
-            <span>Mobiliz Panel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => api.openExternal('https://optifleet.net')}
-            className="nd-btn nd-btn-secondary px-3 py-2 text-xs flex items-center gap-1.5"
-          >
-            <ExternalLink size={14} style={{ color: 'var(--green)' }} />
-            <span>Renault Optifleet</span>
+            <span>{liveSimActive ? 'Canlı Akış' : 'Duraklatıldı'}</span>
           </button>
 
           <button
@@ -687,117 +800,132 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
             className="nd-btn nd-btn-secondary px-3 py-2 text-xs flex items-center gap-1.5"
           >
             <Settings size={14} />
-            <span>API Bağlantı Ayarları</span>
+            <span>Hesap & API Bağla</span>
           </button>
         </div>
       </div>
 
-      {/* KPI SUMMARY CARDS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* KPI SUMMARY CARDS (CLICKABLE IN-APP FILTERS) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
         <div
           onClick={() => {
             setProviderFilter('all');
             setStatusFilter('all');
+            handleShowAllFleetOnMap();
           }}
-          className="nd-card p-3.5 cursor-pointer transition-transform hover:scale-[1.01]"
+          className="nd-card p-3 cursor-pointer transition-transform hover:scale-[1.01]"
         >
           <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>Toplam Takip Edilen</span>
-            <Truck size={15} style={{ color: 'var(--champagne)' }} />
+            <span>Tüm Filo</span>
+            <Truck size={14} style={{ color: 'var(--champagne)' }} />
           </div>
-          <div className="text-xl font-extrabold mt-1 tabular-nums">{kpiStats.total} Araç</div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Tüm Filo Aktif
+          <div className="text-lg font-extrabold mt-0.5 tabular-nums">{kpiStats.total} Araç</div>
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Haritada Göster
           </div>
         </div>
 
         <div
           onClick={() => setStatusFilter(statusFilter === 'moving' ? 'all' : 'moving')}
-          className="nd-card p-3.5 cursor-pointer transition-transform hover:scale-[1.01]"
+          className="nd-card p-3 cursor-pointer transition-transform hover:scale-[1.01]"
         >
           <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
             <span>Hareket Halinde</span>
-            <Navigation size={15} style={{ color: 'var(--green)' }} />
+            <Navigation size={14} style={{ color: 'var(--green)' }} />
           </div>
-          <div className="text-xl font-extrabold mt-1 tabular-nums" style={{ color: 'var(--green)' }}>
+          <div className="text-lg font-extrabold mt-0.5 tabular-nums" style={{ color: 'var(--green)' }}>
             {kpiStats.moving} Araç
           </div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
             Seferde / Yolda
           </div>
         </div>
 
         <div
           onClick={() => setStatusFilter(statusFilter === 'idle' ? 'all' : 'idle')}
-          className="nd-card p-3.5 cursor-pointer transition-transform hover:scale-[1.01]"
+          className="nd-card p-3 cursor-pointer transition-transform hover:scale-[1.01]"
         >
           <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
             <span>Rölanti / Dolumda</span>
-            <Clock size={15} style={{ color: 'var(--amber)' }} />
+            <Clock size={14} style={{ color: 'var(--amber)' }} />
           </div>
-          <div className="text-xl font-extrabold mt-1 tabular-nums" style={{ color: 'var(--amber)' }}>
+          <div className="text-lg font-extrabold mt-0.5 tabular-nums" style={{ color: 'var(--amber)' }}>
             {kpiStats.idle} Araç
           </div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Kontak Açık Beklemede
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Kontak Açık
           </div>
         </div>
 
         <div
           onClick={() => setStatusFilter(statusFilter === 'stopped' ? 'all' : 'stopped')}
-          className="nd-card p-3.5 cursor-pointer transition-transform hover:scale-[1.01]"
+          className="nd-card p-3 cursor-pointer transition-transform hover:scale-[1.01]"
         >
           <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>Park / Kontak Kapalı</span>
-            <MapPin size={15} style={{ color: 'var(--text-muted)' }} />
+            <span>Park / Kapalı</span>
+            <MapPin size={14} style={{ color: 'var(--text-muted)' }} />
           </div>
-          <div className="text-xl font-extrabold mt-1 tabular-nums">{kpiStats.stopped} Araç</div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Dinlenme / Garaj
+          <div className="text-lg font-extrabold mt-0.5 tabular-nums">{kpiStats.stopped} Araç</div>
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Dinlenme / Tesis
           </div>
         </div>
 
         <div
-          onClick={() => setProviderFilter(providerFilter === 'mobiliz' ? 'all' : 'mobiliz')}
-          className="nd-card p-3.5 cursor-pointer transition-transform hover:scale-[1.01]"
+          onClick={() => {
+            setActivePortalView('mobiliz_panel');
+            setProviderFilter('mobiliz');
+          }}
+          className="nd-card p-3 cursor-pointer transition-transform hover:scale-[1.01]"
         >
           <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>Mobiliz GPS</span>
-            <Radio size={15} style={{ color: 'var(--champagne)' }} />
+            <span>Mobiliz Takip</span>
+            <Radio size={14} style={{ color: 'var(--champagne)' }} />
           </div>
-          <div className="text-xl font-extrabold mt-1 tabular-nums" style={{ color: 'var(--champagne)' }}>
+          <div className="text-lg font-extrabold mt-0.5 tabular-nums" style={{ color: 'var(--champagne)' }}>
             {kpiStats.mobilizCount} Araç
           </div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Mobiliz Cihaz Bağlı
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Mobiliz Ekranını Aç
           </div>
         </div>
 
         <div
-          onClick={() => setProviderFilter(providerFilter === 'renault' ? 'all' : 'renault')}
-          className="nd-card p-3.5 cursor-pointer transition-transform hover:scale-[1.01]"
+          onClick={() => {
+            setActivePortalView('renault_panel');
+            setProviderFilter('renault');
+          }}
+          className="nd-card p-3 cursor-pointer transition-transform hover:scale-[1.01]"
         >
           <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
             <span>Renault Optifleet</span>
-            <Activity size={15} style={{ color: 'var(--green)' }} />
+            <Activity size={14} style={{ color: 'var(--green)' }} />
           </div>
-          <div className="text-xl font-extrabold mt-1 tabular-nums" style={{ color: 'var(--green)' }}>
+          <div className="text-lg font-extrabold mt-0.5 tabular-nums" style={{ color: 'var(--green)' }}>
             {kpiStats.renaultCount} Araç
           </div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Renault Fabrika Sistemi
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Renault Ekranını Aç
           </div>
         </div>
       </div>
 
-      {/* MAIN WORKSPACE: LEFT FLEET LIST + CENTER LIVE MAP + RIGHT TELEMETRY INSPECTOR */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+      {/* =================================================================================
+          MAIN IN-APP VIEW: FLEET LIST + INTERACTIVE REAL MAP + TELEMETRY INSPECTOR
+         ================================================================================= */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
         {/* LEFT COLUMN (3 cols): VEHICLE LIST & FILTERS */}
-        <div className="xl:col-span-3 nd-card p-4 space-y-3.5">
+        <div className="xl:col-span-3 nd-card p-3.5 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-extrabold">Filo Araç Listesi</h3>
+            <h3 className="text-xs sm:text-sm font-extrabold">
+              {activePortalView === 'mobiliz_panel'
+                ? 'Mobiliz Araç Listesi'
+                : activePortalView === 'renault_panel'
+                ? 'Renault Optifleet Araçları'
+                : 'Filo Araç Listesi'}
+            </h3>
             <span className="text-[11px] font-bold px-2 py-0.5 rounded-full nd-layer">
-              {filteredFleet.length} / {enrichedFleet.length}
+              {filteredFleet.length} Araç
             </span>
           </div>
 
@@ -814,7 +942,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
           </div>
 
           {/* System Filter Pills */}
-          <div className="grid grid-cols-3 gap-1.5 p-1 nd-layer rounded-xl text-[11px] font-bold">
+          <div className="grid grid-cols-3 gap-1 p-1 nd-layer rounded-xl text-[11px] font-bold">
             <button
               type="button"
               onClick={() => setProviderFilter('all')}
@@ -845,7 +973,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
           </div>
 
           {/* Scrollable Vehicle Cards */}
-          <div className="space-y-2 max-h-[540px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1">
             {filteredFleet.map((item) => {
               const isSelected = selectedItem?.vehicle.id === item.vehicle.id;
               const isMoving = item.tele.ignition === 'moving';
@@ -853,7 +981,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
               return (
                 <div
                   key={item.vehicle.id}
-                  onClick={() => setSelectedVehicleId(item.vehicle.id)}
+                  onClick={() => handleFocusVehicle(item.vehicle.id, true)}
                   className={`p-3 rounded-xl border cursor-pointer transition-all ${
                     isSelected ? 'ring-2 ring-emerald-500/60 shadow-md' : 'hover:opacity-95'
                   }`}
@@ -894,7 +1022,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
 
                   <div className="flex items-center justify-between mt-1.5 text-[11px]">
                     <span className="font-semibold truncate" style={{ color: 'var(--text-muted)' }}>
-                      Şoför: {item.driverName}
+                      {item.driverName}
                     </span>
                     <span
                       className="font-extrabold tabular-nums"
@@ -918,8 +1046,10 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                     <span className="truncate">{item.tele.locationLabel}</span>
                   </div>
 
-                  {/* Mini Fuel & AdBlue Bar for Renault/Both */}
-                  <div className="mt-2 pt-2 border-t grid grid-cols-2 gap-2 text-[10px]" style={{ borderColor: 'var(--border)' }}>
+                  <div
+                    className="mt-2 pt-2 border-t grid grid-cols-2 gap-2 text-[10px]"
+                    style={{ borderColor: 'var(--border)' }}
+                  >
                     <div>
                       <div className="flex justify-between mb-0.5">
                         <span style={{ color: 'var(--text-muted)' }}>Yakıt</span>
@@ -948,272 +1078,309 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                 </div>
               );
             })}
-
-            {filteredFleet.length === 0 && (
-              <div className="p-6 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-                Filtreye uygun araç bulunamadı.
-              </div>
-            )}
           </div>
         </div>
 
-        {/* CENTER COLUMN (5 cols): INTERACTIVE LIVE FLEET MAP & SATELLITE/STREET MAP */}
+        {/* CENTER COLUMN (5 cols): IN-APP REAL MULTI-VEHICLE SATELLITE / STREET / RADAR MAP */}
         <div className="xl:col-span-5 space-y-4">
           <div className="nd-card overflow-hidden">
-            {/* Map Header */}
+            {/* Map Controls Header */}
             <div
-              className="p-3.5 border-b flex flex-wrap items-center justify-between gap-2"
+              className="p-3 border-b flex flex-wrap items-center justify-between gap-2"
               style={{ borderColor: 'var(--border)' }}
             >
               <div className="flex items-center gap-2">
-                <Compass size={17} style={{ color: 'var(--champagne)' }} />
+                <Layers size={16} style={{ color: 'var(--champagne)' }} />
                 <div>
                   <h3 className="text-xs sm:text-sm font-extrabold">
-                    {mapViewMode === 'corridor'
-                      ? 'Canlı Filo Otoyol & Koridor Haritası (Tüm Araçlar)'
-                      : `Canlı Sokak & Uydu Haritası — ${selectedItem?.vehicle.plate || ''}`}
+                    {focusedOnSingle && selectedItem
+                      ? `Canlı Araç Haritası — ${selectedItem.vehicle.plate}`
+                      : 'Canlı Filo Haritası (Tüm Araçlar Aynı Ekranda)'}
                   </h3>
                   <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                    Araca tıklayarak odaklanabilir veya Sokak/Uydu haritasına geçebilirsiniz
+                    {selectedItem?.tele.locationLabel}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              {/* Layer Switcher: Uydu / Sokak / Radar */}
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setMapViewMode('corridor')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    mapViewMode === 'corridor' ? 'nd-btn-primary' : 'nd-layer'
+                  onClick={() => setMapLayerStyle('satellite')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                    mapLayerStyle === 'satellite' ? 'nd-btn-primary' : 'nd-layer'
                   }`}
                 >
-                  Tüm Filo Radar
+                  Uydu Haritası
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMapViewMode('satellite')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    mapViewMode === 'satellite' ? 'nd-btn-primary' : 'nd-layer'
+                  onClick={() => setMapLayerStyle('street')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                    mapLayerStyle === 'street' ? 'nd-btn-primary' : 'nd-layer'
                   }`}
                 >
                   Sokak Haritası
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setMapLayerStyle('radar')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                    mapLayerStyle === 'radar' ? 'nd-btn-primary' : 'nd-layer'
+                  }`}
+                >
+                  Koyu Radar
+                </button>
               </div>
             </div>
 
-            {/* MAP VIEWPORT */}
-            {mapViewMode === 'corridor' ? (
-              <div className="relative w-full bg-[#0F1714] select-none overflow-hidden">
-                <svg
-                  viewBox="0 0 800 420"
-                  className="w-full h-[340px] sm:h-[400px] block"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <defs>
-                    <radialGradient id="mapRadarGlow" cx="400" cy="210" r="360" gradientUnits="userSpaceOnUse">
-                      <stop offset="0%" stopColor="#2D6E55" stopOpacity="0.18" />
-                      <stop offset="100%" stopColor="#0D1311" stopOpacity="0" />
-                    </radialGradient>
-                    <pattern id="mapGrid" width="40" height="40" patternUnits="userSpaceOnUse">
-                      <path
-                        d="M 40 0 L 0 0 0 40"
-                        fill="none"
-                        stroke="#2D6E55"
-                        strokeWidth="0.6"
-                        strokeOpacity="0.22"
-                      />
-                    </pattern>
-                  </defs>
-
-                  {/* Map Base & Radar Grid */}
-                  <rect width="800" height="420" fill="#101714" />
-                  <rect width="800" height="420" fill="url(#mapGrid)" />
-                  <circle cx="400" cy="210" r="340" fill="url(#mapRadarGlow)" />
-
-                  {/* Stylized Sea of Marmara & Bosphorus Water Body */}
-                  <path
-                    d="M 280 285 C 360 265, 490 255, 620 270 C 690 278, 745 292, 775 305 L 775 365 C 660 365, 480 375, 310 355 C 260 345, 240 310, 280 285 Z"
-                    fill="#13242B"
-                    stroke="#244652"
-                    strokeWidth="1.2"
-                  />
-                  <text x="485" y="325" fill="#467687" fontSize="11" fontWeight="700" letterSpacing="2">
-                    MARMARA DENİZİ
-                  </text>
-
-                  {/* Major Highway Network (TEM O-3 / E80, D-100, D-110, Kuzey Marmara O-7) */}
-                  {/* TEM O-3 / E80: Edirne -> Lüleburgaz -> Silivri -> İstanbul -> İzmit TÜPRAŞ */}
-                  <path
-                    d="M 75 95 Q 235 160 420 215 T 735 280"
-                    fill="none"
-                    stroke="#263831"
-                    strokeWidth="8"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M 75 95 Q 235 160 420 215 T 735 280"
-                    fill="none"
-                    stroke="#C5A872"
-                    strokeWidth="1.8"
-                    strokeDasharray="7 6"
-                    strokeOpacity="0.65"
-                  />
-
-                  {/* Southern Trakya Route: Edirne -> Uzunköprü -> Keşan -> Tekirdağ -> Marmaraereğlisi */}
-                  <path
-                    d="M 75 95 L 115 215 L 105 310 L 355 255 L 420 215"
-                    fill="none"
-                    stroke="#1F3029"
-                    strokeWidth="5"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M 75 95 L 115 215 L 105 310 L 355 255 L 420 215"
-                    fill="none"
-                    stroke="#388264"
-                    strokeWidth="1.3"
-                    strokeDasharray="4 4"
-                    strokeOpacity="0.6"
-                  />
-
-                  {/* City Hub Nodes */}
-                  {[
-                    { label: 'EDİRNE MERKEZ', x: 78, y: 92 },
-                    { label: 'KIRKLARELİ / LÜLEBURGAZ', x: 242, y: 162 },
-                    { label: 'UZUNKÖPRÜ', x: 118, y: 214 },
-                    { label: 'KEŞAN', x: 106, y: 312 },
-                    { label: 'TEKİRDAĞ / OPET TERMİNAL', x: 356, y: 254 },
-                    { label: 'İSTANBUL / SİLİVRİ', x: 432, y: 214 },
-                    { label: 'TÜPRAŞ İZMİT RAFİNERİSİ', x: 728, y: 278 }
-                  ].map((hub, i) => (
-                    <g key={i}>
-                      <circle cx={hub.x} cy={hub.y} r="4.5" fill="#141A17" stroke="#C5A872" strokeWidth="2" />
-                      <text
-                        x={hub.x}
-                        y={hub.y - 9}
-                        textAnchor="middle"
-                        fill="#959E99"
-                        fontSize="9.5"
-                        fontWeight="700"
-                      >
-                        {hub.label}
-                      </text>
-                    </g>
+            {/* IN-APP INTERACTIVE MAP VIEWPORT */}
+            <div className="relative w-full h-[380px] sm:h-[440px] bg-[#0E1512] overflow-hidden select-none">
+              {/* REAL SATELLITE OR STREET SLIPPY TILES LAYER */}
+              {mapLayerStyle !== 'radar' && (
+                <div className="absolute inset-0 pointer-events-none">
+                  {tileLayerData.tiles.map((tile) => (
+                    <img
+                      key={tile.key}
+                      src={tile.url}
+                      alt=""
+                      draggable={false}
+                      style={{
+                        position: 'absolute',
+                        left: `${(tile.left / mapViewportWidth) * 100}%`,
+                        top: `${(tile.top / mapViewportHeight) * 100}%`,
+                        width: `${(256 / mapViewportWidth) * 100 + 0.25}%`,
+                        height: `${(256 / mapViewportHeight) * 100 + 0.25}%`,
+                        filter:
+                          mapLayerStyle === 'street'
+                            ? 'brightness(0.88) contrast(1.06)'
+                            : 'brightness(0.92) contrast(1.08)'
+                      }}
+                    />
                   ))}
+                  {/* Subtle dark vignette for high legibility of vehicle labels */}
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      background:
+                        'radial-gradient(circle at center, rgba(14,21,18,0.05) 45%, rgba(14,21,18,0.45) 100%)'
+                    }}
+                  />
+                </div>
+              )}
 
-                  {/* Vehicle Markers on Radar */}
-                  {filteredFleet.map((item) => {
-                    const pos = projectToRadar(item.tele.lat, item.tele.lng);
-                    const isSelected = selectedItem?.vehicle.id === item.vehicle.id;
-                    const isMoving = item.tele.ignition === 'moving';
-                    const isIdle = item.tele.ignition === 'idle';
-                    const dotColor = isMoving ? '#34D399' : isIdle ? '#FBBF24' : '#94A3B8';
-
-                    return (
-                      <g
-                        key={item.vehicle.id}
-                        transform={`translate(${pos.x}, ${pos.y})`}
-                        onClick={() => setSelectedVehicleId(item.vehicle.id)}
-                        className="cursor-pointer"
-                      >
-                        {/* Pulse Ring for Selected or Moving Vehicle */}
-                        {(isSelected || isMoving) && (
-                          <circle
-                            r={isSelected ? 22 : 15}
-                            fill={dotColor}
-                            fillOpacity={isSelected ? 0.22 : 0.12}
-                            stroke={dotColor}
-                            strokeWidth={isSelected ? 1.5 : 0.8}
-                            strokeOpacity="0.6"
-                          />
-                        )}
-
-                        {/* Vehicle Marker Core */}
-                        <circle
-                          r={isSelected ? 9 : 7}
-                          fill="#141A17"
-                          stroke={dotColor}
-                          strokeWidth={isSelected ? 3 : 2.2}
+              {/* SVG VECTOR OVERLAY (HIGHWAYS + ALL VEHICLE PINS + CLICKABLE CALLOUTS) */}
+              <svg
+                viewBox={`0 0 ${mapViewportWidth} ${mapViewportHeight}`}
+                className="relative z-10 w-full h-full block"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                {mapLayerStyle === 'radar' && (
+                  <>
+                    <defs>
+                      <pattern id="radarGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                        <path
+                          d="M 40 0 L 0 0 0 40"
+                          fill="none"
+                          stroke="#2D6E55"
+                          strokeWidth="0.6"
+                          strokeOpacity="0.24"
                         />
-                        <circle r="3.2" fill={dotColor} />
+                      </pattern>
+                    </defs>
+                    <rect width={mapViewportWidth} height={mapViewportHeight} fill="#101714" />
+                    <rect width={mapViewportWidth} height={mapViewportHeight} fill="url(#radarGrid)" />
+                  </>
+                )}
 
-                        {/* Floating Plate & Speed Callout */}
-                        <g transform="translate(0, -16)">
-                          <rect
-                            x="-48"
-                            y="-22"
-                            width="96"
-                            height="20"
-                            rx="6"
-                            fill={isSelected ? '#1E4D3B' : '#18201D'}
-                            stroke={isSelected ? '#DEC38F' : '#2E3A35'}
-                            strokeWidth={isSelected ? '1.5' : '1'}
-                          />
-                          <text
-                            x="0"
-                            y="-9"
-                            textAnchor="middle"
-                            fill="#F6F5F0"
-                            fontSize="9.5"
-                            fontWeight="800"
-                          >
-                            {item.vehicle.plate} • {isMoving ? `${item.tele.speedKmh}km` : 'PARK'}
-                          </text>
+                {/* Corridor Highway Polyline connecting Edirne -> Lüleburgaz -> Tekirdağ -> Silivri -> İzmit TÜPRAŞ */}
+                {(() => {
+                  const corridorPoints = [
+                    { lat: 41.6771, lng: 26.5557, name: 'EDİRNE' },
+                    { lat: 41.4056, lng: 27.3569, name: 'LÜLEBURGAZ' },
+                    { lat: 40.9708, lng: 27.9553, name: 'M.EREĞLİSİ OPET' },
+                    { lat: 41.0736, lng: 28.2464, name: 'SİLİVRİ' },
+                    { lat: 40.7569, lng: 29.7636, name: 'TÜPRAŞ İZMİT' }
+                  ];
+                  const pts = corridorPoints.map((p) => ({
+                    ...p,
+                    ...tileLayerData.projectLatLng(p.lat, p.lng)
+                  }));
+                  const polyStr = pts.map((p) => `${p.x},${p.y}`).join(' ');
+                  return (
+                    <g>
+                      <polyline
+                        points={polyStr}
+                        fill="none"
+                        stroke="#141A17"
+                        strokeWidth="6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeOpacity="0.65"
+                      />
+                      <polyline
+                        points={polyStr}
+                        fill="none"
+                        stroke="#DEC38F"
+                        strokeWidth="2.4"
+                        strokeDasharray="8 6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {pts.map((p, idx) => (
+                        <g key={idx} transform={`translate(${p.x}, ${p.y})`}>
+                          <circle r="4" fill="#141A17" stroke="#DEC38F" strokeWidth="2" />
+                          {mapLayerStyle === 'radar' && (
+                            <text
+                              y="-8"
+                              textAnchor="middle"
+                              fill="#DEC38F"
+                              fontSize="9"
+                              fontWeight="800"
+                            >
+                              {p.name}
+                            </text>
+                          )}
                         </g>
-                      </g>
-                    );
-                  })}
-                </svg>
+                      ))}
+                    </g>
+                  );
+                })()}
 
-                {/* Bottom Overlay Legend */}
-                <div className="px-3.5 py-2.5 bg-black/55 backdrop-blur-xs border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
-                      Hareket Halinde
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
-                      Rölanti / Dolumda
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" />
-                      Park Halinde
-                    </span>
-                  </div>
+                {/* ALL FLEET VEHICLE PINS ON THE REAL MAP */}
+                {filteredFleet.map((item) => {
+                  const pos = tileLayerData.projectLatLng(item.tele.lat, item.tele.lng);
+                  const isSelected = selectedItem?.vehicle.id === item.vehicle.id;
+                  const isMoving = item.tele.ignition === 'moving';
+                  const isIdle = item.tele.ignition === 'idle';
+                  const dotColor = isMoving ? '#10B981' : isIdle ? '#F59E0B' : '#94A3B8';
+                  const badgeBg = isSelected ? '#1B4333' : '#141A17';
+                  const badgeBorder = isSelected ? '#F2DAA6' : dotColor;
+
+                  return (
+                    <g
+                      key={item.vehicle.id}
+                      transform={`translate(${pos.x}, ${pos.y})`}
+                      onClick={() => handleFocusVehicle(item.vehicle.id, true)}
+                      className="cursor-pointer"
+                    >
+                      {/* Animated Radar Pulse Ring */}
+                      {(isSelected || isMoving) && (
+                        <circle
+                          r={isSelected ? 26 : 16}
+                          fill={dotColor}
+                          fillOpacity={isSelected ? 0.28 : 0.18}
+                          stroke={dotColor}
+                          strokeWidth={isSelected ? 2 : 1}
+                        />
+                      )}
+
+                      {/* Truck Position Pin */}
+                      <circle
+                        r={isSelected ? 10 : 8}
+                        fill="#141A17"
+                        stroke="#FFFFFF"
+                        strokeWidth="2"
+                      />
+                      <circle r={isSelected ? 6.5 : 5} fill={dotColor} />
+
+                      {/* Callout Tag Above Pin: Plate + Speed + Provider */}
+                      <g transform="translate(0, -18)">
+                        <rect
+                          x="-58"
+                          y="-26"
+                          width="116"
+                          height="24"
+                          rx="7"
+                          fill={badgeBg}
+                          fillOpacity="0.94"
+                          stroke={badgeBorder}
+                          strokeWidth={isSelected ? '2' : '1.2'}
+                        />
+                        <text
+                          x="0"
+                          y="-11"
+                          textAnchor="middle"
+                          fill="#FFFFFF"
+                          fontSize="10"
+                          fontWeight="800"
+                        >
+                          {item.vehicle.plate} • {isMoving ? `${item.tele.speedKmh} km/s` : 'PARK'}
+                        </text>
+                      </g>
+                    </g>
+                  );
+                })}
+              </svg>
+
+              {/* Floating Map Zoom & Focus Controls (Top-Right inside Map) */}
+              <div className="absolute top-3 right-3 z-20 flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMapZoom((z) => Math.min(15, z + 1))}
+                  className="w-8 h-8 rounded-xl bg-black/75 text-white border border-white/15 flex items-center justify-center hover:bg-black"
+                  title="Yakınlaştır"
+                >
+                  <ZoomIn size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapZoom((z) => Math.max(6, z - 1))}
+                  className="w-8 h-8 rounded-xl bg-black/75 text-white border border-white/15 flex items-center justify-center hover:bg-black"
+                  title="Uzaklaştır"
+                >
+                  <ZoomOut size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShowAllFleetOnMap}
+                  className="w-8 h-8 rounded-xl bg-black/75 text-amber-300 border border-white/15 flex items-center justify-center hover:bg-black"
+                  title="Tüm Filoyu Göster"
+                >
+                  <Maximize2 size={15} />
+                </button>
+              </div>
+
+              {/* Bottom Map Status Bar */}
+              <div className="absolute bottom-0 inset-x-0 z-20 px-3.5 py-2 bg-black/75 backdrop-blur-xs border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white">
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
+                    Hareket ({kpiStats.moving})
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                    Rölanti ({kpiStats.idle})
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" />
+                    Park ({kpiStats.stopped})
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
                   {selectedItem && (
-                    <span className="font-bold" style={{ color: 'var(--champagne)' }}>
-                      Seçili: {selectedItem.vehicle.plate} ({selectedItem.tele.lat.toFixed(4)}°K,{' '}
-                      {selectedItem.tele.lng.toFixed(4)}°D)
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleFocusVehicle(selectedItem.vehicle.id, true)}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-[10px]"
+                    >
+                      {selectedItem.vehicle.plate} Aracına Yaklaş
+                    </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={handleShowAllFleetOnMap}
+                    className="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white font-bold text-[10px]"
+                  >
+                    Tüm Filoyu Gör
+                  </button>
                 </div>
               </div>
-            ) : (
-              /* REAL STREET / SATELLITE EMBEDDED MAP FOR SELECTED VEHICLE */
-              <div className="relative w-full h-[365px] sm:h-[425px] bg-[#101714]">
-                {selectedItem ? (
-                  <iframe
-                    title={`Canlı Harita - ${selectedItem.vehicle.plate}`}
-                    width="100%"
-                    height="100%"
-                    style={{ border: 0 }}
-                    loading="lazy"
-                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${
-                      selectedItem.tele.lng - 0.045
-                    }%2C${selectedItem.tele.lat - 0.03}%2C${selectedItem.tele.lng + 0.045}%2C${
-                      selectedItem.tele.lat + 0.03
-                    }&layer=mapnik&marker=${selectedItem.tele.lat}%2C${selectedItem.tele.lng}`}
-                  />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-xs">
-                    Haritada görmek için bir araç seçin.
-                  </div>
-                )}
-              </div>
-            )}
+            </div>
 
-            {/* Quick Map Action Bar for Selected Vehicle */}
+            {/* Selected Vehicle Quick Bar Below Map */}
             {selectedItem && (
               <div
                 className="p-3 border-t flex flex-wrap items-center justify-between gap-2 text-xs"
@@ -1221,25 +1388,15 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <MapPin size={15} style={{ color: 'var(--champagne)' }} className="shrink-0" />
-                  <span className="font-bold truncate">{selectedItem.tele.locationLabel}</span>
+                  <span className="font-bold truncate">
+                    {selectedItem.vehicle.plate}: {selectedItem.tele.locationLabel}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() =>
-                      api.openExternal(
-                        `https://www.google.com/maps/search/?api=1&query=${selectedItem.tele.lat},${selectedItem.tele.lng}`
-                      )
-                    }
-                    className="nd-btn nd-btn-secondary px-2.5 py-1.5 text-[11px] flex items-center gap-1"
-                  >
-                    <ExternalLink size={12} />
-                    <span>Google Haritalar'da Aç</span>
-                  </button>
-                  <button
-                    type="button"
                     onClick={handleOpenEditModal}
-                    className="nd-btn nd-btn-primary px-2.5 py-1.5 text-[11px] flex items-center gap-1"
+                    className="nd-btn nd-btn-primary px-3 py-1.5 text-[11px] flex items-center gap-1"
                   >
                     <Edit3 size={12} />
                     <span>Konum & Sistem Düzenle</span>
@@ -1249,101 +1406,96 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
             )}
           </div>
 
-          {/* ACTIVE TRIP & ROUTE PROGRESS CARD FOR SELECTED VEHICLE */}
-          {selectedItem && (
-            <div className="nd-card p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Route size={16} style={{ color: 'var(--champagne)' }} />
-                  <h4 className="text-xs sm:text-sm font-extrabold">
-                    Aktif Sefer & Güzergah Bağlantısı — {selectedItem.vehicle.plate}
-                  </h4>
-                </div>
-                {selectedItem.activeTrip && onNavigate && (
-                  <button
-                    type="button"
-                    onClick={() => onNavigate('trips', selectedItem.activeTrip?.id)}
-                    className="text-[11px] font-bold underline cursor-pointer"
-                    style={{ color: 'var(--champagne)' }}
-                  >
-                    Sefer Kaydını Aç ({selectedItem.activeTrip.trip_no}) →
-                  </button>
-                )}
+          {/* IN-APP MOBILIZ OR RENAULT FULL FLEET COMPARISON TABLE (Always visible inside the app!) */}
+          <div className="nd-card p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History size={16} style={{ color: 'var(--champagne)' }} />
+                <h4 className="text-xs sm:text-sm font-extrabold">
+                  {activePortalView === 'renault_panel'
+                    ? 'Renault Optifleet — Tüm Araçların Canlı Beyin (CAN-Bus) Tablosu'
+                    : 'Mobiliz & Renault — Canlı Filo Durum Tablosu'}
+                </h4>
               </div>
-
-              {selectedItem.activeTrip ? (
-                <div className="p-3.5 rounded-xl nd-layer space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div>
-                      <span className="text-[10px] uppercase font-bold block" style={{ color: 'var(--text-muted)' }}>
-                        Çıkış / Dolum Noktası
-                      </span>
-                      <span className="font-extrabold">{selectedItem.activeTrip.origin}</span>
-                    </div>
-                    <div className="text-center px-2">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold nd-badge-green">
-                        {selectedItem.activeTrip.status === 'transit'
-                          ? 'Yolda / Sevkiyatta'
-                          : selectedItem.activeTrip.status === 'planned'
-                          ? 'Planlandı / Hazırlık'
-                          : 'Teslim Edildi'}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] uppercase font-bold block" style={{ color: 'var(--text-muted)' }}>
-                        Varış İstasyonu / Bölge
-                      </span>
-                      <span className="font-extrabold">{selectedItem.activeTrip.destination}</span>
-                    </div>
-                  </div>
-
-                  {/* Route Progress Bar */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span style={{ color: 'var(--text-muted)' }}>
-                        Otoyol: <strong>{selectedItem.tele.highwayName}</strong>
-                      </span>
-                      <span className="font-bold" style={{ color: 'var(--champagne)' }}>
-                        Bugün Kat Edilen: {selectedItem.tele.dailyDistanceKm} km
-                      </span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-black/30 overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: selectedItem.activeTrip.status === 'delivered' ? '100%' : '68%',
-                          background: 'linear-gradient(90deg, #2D6E55 0%, #C5A872 100%)'
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3.5 rounded-xl nd-layer text-xs flex items-center justify-between">
-                  <span style={{ color: 'var(--text-muted)' }}>
-                    Bu araç için şu an açık bir sefer kaydı bulunmuyor; GPS ve CAN-Bus telemetri takibi aktif.
-                  </span>
-                  {onNavigate && (
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('trips')}
-                      className="nd-btn nd-btn-secondary px-2.5 py-1 text-[11px] shrink-0"
-                    >
-                      + Sefer Ata
-                    </button>
-                  )}
-                </div>
-              )}
+              <span className="text-[10px] font-bold" style={{ color: 'var(--text-muted)' }}>
+                Satıra tıklayarak haritada araca odaklanın
+              </span>
             </div>
-          )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b text-[10px] uppercase" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+                    <th className="py-2 pr-2">Plaka & Şoför</th>
+                    <th className="py-2 px-2">Sistem</th>
+                    <th className="py-2 px-2">Hız & Durum</th>
+                    <th className="py-2 px-2">Yakıt / AdBlue</th>
+                    <th className="py-2 px-2">Takograf KM</th>
+                    <th className="py-2 pl-2">Bulunduğu Mevki</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                  {filteredFleet.map((item) => {
+                    const isSelected = selectedItem?.vehicle.id === item.vehicle.id;
+                    return (
+                      <tr
+                        key={item.vehicle.id}
+                        onClick={() => handleFocusVehicle(item.vehicle.id, true)}
+                        className="cursor-pointer transition-colors"
+                        style={{
+                          backgroundColor: isSelected ? 'var(--layer)' : 'transparent'
+                        }}
+                      >
+                        <td className="py-2.5 pr-2">
+                          <div className="font-extrabold">{item.vehicle.plate}</div>
+                          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                            {item.driverName}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold nd-badge-champagne">
+                            {item.tele.provider === 'both'
+                              ? 'MOBİLİZ + RENAULT'
+                              : item.tele.provider === 'renault'
+                              ? 'RENAULT'
+                              : 'MOBİLİZ'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-2 font-bold tabular-nums">
+                          {item.tele.ignition === 'moving' ? (
+                            <span style={{ color: 'var(--green)' }}>{item.tele.speedKmh} km/s</span>
+                          ) : item.tele.ignition === 'idle' ? (
+                            <span style={{ color: 'var(--amber)' }}>Rölanti</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>Park</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-2 tabular-nums">
+                          <span className="font-bold text-emerald-400">%{item.tele.fuelPercent}</span>
+                          {' / '}
+                          <span className="font-bold text-sky-400">%{item.tele.adBluePercent}</span>
+                        </td>
+                        <td className="py-2.5 px-2 font-bold tabular-nums">
+                          {item.tele.odometerKm.toLocaleString('tr-TR')} km
+                        </td>
+                        <td className="py-2.5 pl-2 text-[11px] max-w-[180px] truncate">
+                          {item.tele.locationLabel}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         {/* RIGHT COLUMN (4 cols): RENAULT OPTIFLEET CAN-BUS + MOBILIZ TELEMETRY INSPECTOR */}
         <div className="xl:col-span-4 space-y-4">
           {selectedItem ? (
             <>
-              {/* 1. SELECTED VEHICLE HEADER & DRIVER QUICK CONTACT */}
-              <div className="nd-card p-4 space-y-3.5">
+              {/* 1. SELECTED VEHICLE HEADER & IN-APP QUICK NAVIGATION */}
+              <div className="nd-card p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2">
@@ -1360,14 +1512,15 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                         }`}
                       >
                         {selectedItem.tele.ignition === 'moving'
-                          ? `HAREKET HALİNDE • ${selectedItem.tele.speedKmh} km/s`
+                          ? `YOLDA • ${selectedItem.tele.speedKmh} km/s`
                           : selectedItem.tele.ignition === 'idle'
-                          ? 'RÖLANTİDE BEKLİYOR'
-                          : 'PARK / KONTAK KAPALI'}
+                          ? 'RÖLANTİDE'
+                          : 'PARK HALİNDE'}
                       </span>
                     </div>
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      Zimmetli Şoför: <strong>{selectedItem.driverName}</strong>
+                      Şoför: <strong>{selectedItem.driverName}</strong>{' '}
+                      {selectedItem.driverPhone ? `• ${selectedItem.driverPhone}` : ''}
                     </p>
                   </div>
 
@@ -1382,59 +1535,34 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                   )}
                 </div>
 
-                {/* Driver Contact Buttons */}
+                {/* In-App Action Buttons (No external popups!) */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      const clean = (selectedItem.driverPhone || '').replace(/\D+/g, '');
-                      if (!clean) {
-                        alertDialog(
-                          'Bu şoför için kayıtlı telefon numarası bulunamadı. Tanker Şoförleri modülünden telefon ekleyebilirsiniz.',
-                          'Telefon Numarası Yok'
-                        );
-                        return;
-                      }
-                      const waPhone = clean.startsWith('0')
-                        ? '9' + clean
-                        : clean.startsWith('90')
-                        ? clean
-                        : '90' + clean;
-                      const msg = encodeURIComponent(
-                        `Merhaba ${selectedItem.driverName}, ${selectedItem.vehicle.plate} plakalı aracımızın güncel durumu hakkında bilgi alabilir miyim?`
-                      );
-                      api.openExternal(`https://wa.me/${waPhone}?text=${msg}`);
-                    }}
+                    onClick={() => handleFocusVehicle(selectedItem.vehicle.id, true)}
                     className="nd-btn nd-btn-primary py-2 text-xs flex items-center justify-center gap-1.5"
                   >
-                    <MessageSquare size={14} />
-                    <span>Şoföre WhatsApp Yaz</span>
+                    <LocateFixed size={14} />
+                    <span>Haritada Araca Odaklan</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      const clean = (selectedItem.driverPhone || '').replace(/\D+/g, '');
-                      if (!clean) {
-                        alertDialog(
-                          'Şoför telefon numarası kayıtlı değil.',
-                          'Telefon Numarası Yok'
-                        );
-                        return;
-                      }
-                      api.openExternal(`tel:${clean}`);
-                    }}
+                    onClick={handleOpenEditModal}
                     className="nd-btn nd-btn-secondary py-2 text-xs flex items-center justify-center gap-1.5"
                   >
-                    <Phone size={14} />
-                    <span>{selectedItem.driverPhone || 'Şoförü Ara'}</span>
+                    <Edit3 size={14} />
+                    <span>Verileri Düzenle</span>
                   </button>
                 </div>
               </div>
 
               {/* 2. RENAULT TRUCKS OPTIFLEET (FACTORY CAN-BUS TELEMETRY) */}
               <div className="nd-card p-4 space-y-3.5">
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--border)' }}>
+                <div
+                  className="flex items-center justify-between border-b pb-2.5"
+                  style={{ borderColor: 'var(--border)' }}
+                >
                   <div className="flex items-center gap-2">
                     <Activity size={16} style={{ color: 'var(--green)' }} />
                     <div>
@@ -1442,12 +1570,12 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                         Renault Trucks Optifleet — Araç Beyin Verileri
                       </h4>
                       <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        Aracın Kendi CAN-Bus Yakıt, AdBlue, Motor & Takograf Telemetrisi
+                        Aracın Kendi CAN-Bus Yakıt, AdBlue, Motor & Takograf Sistemi
                       </span>
                     </div>
                   </div>
                   <span className="px-2 py-0.5 rounded text-[10px] font-extrabold nd-badge-green">
-                    CAN-BUS CANLI
+                    ECO {selectedItem.tele.ecoScore || 9.2}/10
                   </span>
                 </div>
 
@@ -1455,7 +1583,10 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="p-3 rounded-xl nd-layer space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1 font-semibold" style={{ color: 'var(--text-muted)' }}>
+                      <span
+                        className="flex items-center gap-1 font-semibold"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
                         <Fuel size={13} style={{ color: 'var(--green)' }} />
                         Depo Yakıt
                       </span>
@@ -1469,19 +1600,27 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                         style={{ width: `${selectedItem.tele.fuelPercent}%` }}
                       />
                     </div>
-                    <div className="text-[10px] flex justify-between" style={{ color: 'var(--text-muted)' }}>
-                      <span>Kapasite: {selectedItem.tankCapacityLiters} L</span>
-                      <span>Tahmini Menzil: ~{Math.round(selectedItem.currentFuelLiters * 3.1)} km</span>
+                    <div
+                      className="text-[10px] flex justify-between"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      <span>Depo: {selectedItem.tankCapacityLiters} L</span>
+                      <span>Menzil: ~{Math.round(selectedItem.currentFuelLiters * 3.1)} km</span>
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl nd-layer space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1 font-semibold" style={{ color: 'var(--text-muted)' }}>
+                      <span
+                        className="flex items-center gap-1 font-semibold"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
                         <Gauge size={13} className="text-sky-400" />
                         AdBlue Seviyesi
                       </span>
-                      <span className="font-extrabold tabular-nums">%{selectedItem.tele.adBluePercent}</span>
+                      <span className="font-extrabold tabular-nums">
+                        %{selectedItem.tele.adBluePercent}
+                      </span>
                     </div>
                     <div className="h-2.5 w-full rounded-full bg-black/30 overflow-hidden">
                       <div
@@ -1489,14 +1628,17 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                         style={{ width: `${selectedItem.tele.adBluePercent}%` }}
                       />
                     </div>
-                    <div className="text-[10px] flex justify-between" style={{ color: 'var(--text-muted)' }}>
-                      <span>Euro 6 SCR Sistemi</span>
-                      <span>Durum: Normal</span>
+                    <div
+                      className="text-[10px] flex justify-between"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      <span>Renault Euro 6 SCR</span>
+                      <span>Basınç: Normal</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Odometer, Consumption, RPM, Temp, Battery, Tachograph */}
+                {/* Odometer, Consumption, RPM, Temp, Battery */}
                 <div className="grid grid-cols-2 gap-2.5 text-xs">
                   <div className="p-2.5 rounded-xl nd-layer">
                     <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>
@@ -1511,7 +1653,10 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                     <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>
                       Ortalama Yakıt Tüketimi
                     </span>
-                    <span className="font-extrabold text-sm tabular-nums" style={{ color: 'var(--champagne)' }}>
+                    <span
+                      className="font-extrabold text-sm tabular-nums"
+                      style={{ color: 'var(--champagne)' }}
+                    >
                       {selectedItem.tele.avgConsumption.toFixed(1)} L / 100km
                     </span>
                   </div>
@@ -1544,7 +1689,10 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                 {/* Digital Tachograph Driver State */}
                 <div className="p-3 rounded-xl nd-layer flex items-center justify-between text-xs">
                   <div>
-                    <span className="text-[10px] uppercase font-bold block" style={{ color: 'var(--text-muted)' }}>
+                    <span
+                      className="text-[10px] uppercase font-bold block"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
                       Renault Dijital Takograf Sürüş Durumu
                     </span>
                     <span className="font-extrabold">
@@ -1562,13 +1710,16 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                 </div>
               </div>
 
-              {/* 3. MOBILIZ GPS DEVICE STATUS CARD */}
+              {/* 3. MOBILIZ GPS DEVICE & ACTIVE TRIP STATUS CARD */}
               <div className="nd-card p-4 space-y-3">
-                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--border)' }}>
+                <div
+                  className="flex items-center justify-between border-b pb-2"
+                  style={{ borderColor: 'var(--border)' }}
+                >
                   <div className="flex items-center gap-2">
                     <Radio size={15} style={{ color: 'var(--champagne)' }} />
                     <h4 className="text-xs sm:text-sm font-extrabold">
-                      Mobiliz GPS Cihaz & Konum Detayları
+                      Mobiliz GPS Cihaz & Sefer Özeti
                     </h4>
                   </div>
                   <span className="px-2 py-0.5 rounded text-[10px] font-extrabold nd-badge-champagne">
@@ -1581,21 +1732,50 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                     <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>
                       Anlık Hız
                     </span>
-                    <span className="font-extrabold tabular-nums">{selectedItem.tele.speedKmh} km/s</span>
+                    <span className="font-extrabold tabular-nums">
+                      {selectedItem.tele.speedKmh} km/s
+                    </span>
                   </div>
                   <div className="p-2.5 rounded-xl nd-layer">
                     <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>
                       Bugün Mesafe
                     </span>
-                    <span className="font-extrabold tabular-nums">{selectedItem.tele.dailyDistanceKm} km</span>
+                    <span className="font-extrabold tabular-nums">
+                      {selectedItem.tele.dailyDistanceKm} km
+                    </span>
                   </div>
                   <div className="p-2.5 rounded-xl nd-layer">
                     <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>
                       Günlük Rölanti
                     </span>
-                    <span className="font-extrabold tabular-nums">{selectedItem.tele.idleMinutes} dk</span>
+                    <span className="font-extrabold tabular-nums">
+                      {selectedItem.tele.idleMinutes} dk
+                    </span>
                   </div>
                 </div>
+
+                {selectedItem.activeTrip ? (
+                  <div className="p-3 rounded-xl nd-layer space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold" style={{ color: 'var(--champagne)' }}>
+                        Aktif Sefer: {selectedItem.activeTrip.trip_no}
+                      </span>
+                      {onNavigate && (
+                        <button
+                          type="button"
+                          onClick={() => onNavigate('trips', selectedItem.activeTrip?.id)}
+                          className="text-[11px] font-bold underline"
+                        >
+                          Seferi Gör →
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px]">
+                      <strong>{selectedItem.activeTrip.origin}</strong> →{' '}
+                      <strong>{selectedItem.activeTrip.destination}</strong>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </>
           ) : null}
@@ -1606,15 +1786,18 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
       {configModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="nd-modal w-full max-w-xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--border)' }}>
+            <div
+              className="flex items-center justify-between border-b pb-3"
+              style={{ borderColor: 'var(--border)' }}
+            >
               <div className="flex items-center gap-2.5">
                 <KeyRound size={18} style={{ color: 'var(--champagne)' }} />
                 <div>
                   <h3 className="text-sm sm:text-base font-extrabold">
-                    Mobiliz & Renault Optifleet Bağlantı Ayarları
+                    Mobiliz & Renault Optifleet Hesap / API Bağlantısı
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                    API anahtarlarınızı girdiğinizde araç konumları ve Renault beyin verileri otomatik eşitlenir
+                    Bilgilerinizi kaydettiğinizde veriler doğrudan uygulama içindeki harita ve tablolara çekilir
                   </p>
                 </div>
               </div>
@@ -1632,10 +1815,10 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
               <div className="p-3.5 rounded-xl nd-layer space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-extrabold text-sm" style={{ color: 'var(--champagne)' }}>
-                    1. Mobiliz Araç Takip (ng.mobiliz.com.tr)
+                    1. Mobiliz Araç Takip Bağlantısı
                   </span>
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold nd-badge-champagne">
-                    Mobiliz REST API
+                    Uygulama İçi Senkron
                   </span>
                 </div>
 
@@ -1645,31 +1828,20 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                     type="text"
                     value={config.mobilizToken}
                     onChange={(e) => setConfig({ ...config, mobilizToken: e.target.value })}
-                    placeholder="Mobiliz panelinden aldığınız Mobiliz-Token anahtarı (İsteğe bağlı)"
+                    placeholder="Mobiliz-Token anahtarınız"
                     className="nd-input w-full px-3 py-2 rounded-xl"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold mb-1">Mobiliz Kullanıcı / Kurum Kodu</label>
-                    <input
-                      type="text"
-                      value={config.mobilizUsername}
-                      onChange={(e) => setConfig({ ...config, mobilizUsername: e.target.value })}
-                      placeholder="Örn: gokmenpetrol"
-                      className="nd-input w-full px-3 py-2 rounded-xl"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold mb-1">Mobiliz Panel Adresi</label>
-                    <input
-                      type="text"
-                      value={config.mobilizUrl}
-                      onChange={(e) => setConfig({ ...config, mobilizUrl: e.target.value })}
-                      className="nd-input w-full px-3 py-2 rounded-xl"
-                    />
-                  </div>
+                <div>
+                  <label className="block font-bold mb-1">Mobiliz Kullanıcı / Kurum Kodu</label>
+                  <input
+                    type="text"
+                    value={config.mobilizUsername}
+                    onChange={(e) => setConfig({ ...config, mobilizUsername: e.target.value })}
+                    placeholder="Örn: gokmenpetrol"
+                    className="nd-input w-full px-3 py-2 rounded-xl"
+                  />
                 </div>
               </div>
 
@@ -1677,16 +1849,16 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
               <div className="p-3.5 rounded-xl nd-layer space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-extrabold text-sm" style={{ color: 'var(--green)' }}>
-                    2. Renault Trucks Optifleet (Aracın Kendi Takip Sistemi)
+                    2. Renault Trucks Optifleet (Aracın Kendi Sistemi)
                   </span>
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold nd-badge-green">
-                    Renault rFMS CAN-Bus
+                    Renault CAN-Bus
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
-                    <label className="block font-bold mb-1">Optifleet / Volvo Connect API Kullanıcı Adı</label>
+                    <label className="block font-bold mb-1">Optifleet Kullanıcı Adı</label>
                     <input
                       type="text"
                       value={config.renaultUsername}
@@ -1696,7 +1868,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">Optifleet API Şifresi / Anahtarı</label>
+                    <label className="block font-bold mb-1">Optifleet Şifresi / Anahtarı</label>
                     <input
                       type="password"
                       value={config.renaultPassword}
@@ -1708,7 +1880,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1">Yenileme Sıklığı (Saniye)</label>
+                  <label className="block font-bold mb-1">Otomatik Yenileme Sıklığı (Saniye)</label>
                   <input
                     type="number"
                     min={5}
@@ -1731,7 +1903,7 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
                   İptal
                 </button>
                 <button type="submit" className="nd-btn nd-btn-primary px-5 py-2 text-xs font-extrabold">
-                  Ayarları Kaydet ve Eşitle
+                  Kaydet ve Uygulama İçinde Eşitle
                 </button>
               </div>
             </form>
@@ -1743,7 +1915,10 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
       {editModalOpen && selectedItem && editForm && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="nd-modal w-full max-w-lg p-5 sm:p-6 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--border)' }}>
+            <div
+              className="flex items-center justify-between border-b pb-3"
+              style={{ borderColor: 'var(--border)' }}
+            >
               <div>
                 <h3 className="text-sm sm:text-base font-extrabold">
                   {selectedItem.vehicle.plate} — Takip Sistemi & Konum Güncelle
