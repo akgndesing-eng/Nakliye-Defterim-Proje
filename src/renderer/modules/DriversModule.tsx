@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserCheck, Plus, Phone, CreditCard, Fuel, Edit3, Trash2, X } from 'lucide-react';
 import { Driver, Vehicle } from '../../shared/types';
 import { api, getCached } from '../api';
+import { confirmDialog } from '../utils/dialog';
 
 export const DriversModule: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>(() => getCached<Driver[]>('drivers') || []);
@@ -27,7 +28,7 @@ export const DriversModule: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Şoför kaydını silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Şoför kaydını silmek istediğinize emin misiniz?', 'Şoför Silme Onayı'))) return;
     await api.deleteDriver(id);
     loadData();
   };

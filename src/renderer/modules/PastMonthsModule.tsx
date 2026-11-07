@@ -25,6 +25,7 @@ import {
 } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getCurrentMonth } from '../utils/format';
+import { confirmDialog } from '../utils/dialog';
 
 export const PastMonthsModule: React.FC = () => {
   const currentMonth = getCurrentMonth();
@@ -211,7 +212,7 @@ export const PastMonthsModule: React.FC = () => {
   };
 
   const handleDeletePastTrip = async (id: string) => {
-    if (!window.confirm('Geçmiş aya ait bu seferi ve duraklarını silmek istediğinize emin misiniz?')) {
+    if (!(await confirmDialog('Geçmiş aya ait bu seferi ve duraklarını silmek istediğinize emin misiniz?', 'Sefer Silme Onayı'))) {
       return;
     }
     await api.deleteTrip(id);
@@ -252,7 +253,7 @@ export const PastMonthsModule: React.FC = () => {
   };
 
   const handleDeleteExp = async (id: string) => {
-    if (!window.confirm('Geçmiş aya ait bu araç gider kaydını silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Geçmiş aya ait bu araç gider kaydını silmek istediğinize emin misiniz?', 'Gider Silme Onayı'))) return;
     await api.deleteVehicleExpense(id);
     loadArchiveData(archiveMonth);
   };

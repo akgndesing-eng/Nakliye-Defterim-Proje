@@ -14,6 +14,7 @@ import {
 import { ReminderNote, Customer } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatDate, getCurrentDate } from '../utils/format';
+import { confirmDialog } from '../utils/dialog';
 
 export const NotesModule: React.FC = () => {
   const [notes, setNotes] = useState<ReminderNote[]>(() => getCached<ReminderNote[]>('notes') || []);
@@ -71,7 +72,7 @@ export const NotesModule: React.FC = () => {
   };
 
   const handleDeleteNote = async (id: string) => {
-    if (!window.confirm('Bu notu/hatırlatıcıyı silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Bu notu/hatırlatıcıyı silmek istediğinize emin misiniz?', 'Not Silme Onayı'))) return;
     await api.deleteReminderNote(id);
     loadData();
   };

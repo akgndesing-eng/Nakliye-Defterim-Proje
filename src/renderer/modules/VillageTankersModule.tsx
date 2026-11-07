@@ -15,6 +15,7 @@ import {
 import { VillageTanker, VillageTankerLog, Vehicle } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, getCurrentDate, getCurrentMonth } from '../utils/format';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 const MONTH_NAMES_TR = [
   'Ocak',
@@ -121,6 +122,13 @@ export const VillageTankersModule: React.FC = () => {
     return Array.from(map.values());
   }, [tankers, vehicles]);
 
+  // Auto-select first available vehicle when list loads if none selected
+  useEffect(() => {
+    if (!selectedTankerId && selectableVehicles.length > 0 && !editingLogId) {
+      setSelectedTankerId(selectableVehicles[0].id);
+    }
+  }, [selectableVehicles, selectedTankerId, editingLogId]);
+
   // Group all months that have sales records so user can see and pick previous months easily
   const recordedMonthsSummary = React.useMemo(() => {
     const map = new Map<string, { count: number; liters: number; totalSales: number }>();
@@ -160,7 +168,7 @@ export const VillageTankersModule: React.FC = () => {
     setEditingLogId(null);
     const curMonth = getCurrentMonth();
     setLogDate(viewMonth === curMonth ? getCurrentDate() : `${viewMonth}-01`);
-    setSelectedTankerId('');
+    setSelectedTankerId(selectableVehicles[0]?.id || '');
     setLitersInput('');
     setCashInput('');
     setCardInput('');
@@ -169,7 +177,11 @@ export const VillageTankersModule: React.FC = () => {
     setNoteInput('');
     if (focusField) {
       setTimeout(() => {
-        tankerSelectRef.current?.focus();
+        if (selectableVehicles.length > 0) {
+          litersInputRef.current?.focus();
+        } else {
+          tankerSelectRef.current?.focus();
+        }
       }, 50);
     }
   };
@@ -208,13 +220,14 @@ export const VillageTankersModule: React.FC = () => {
   };
 
   const saveCurrentRecord = async () => {
-    if (!selectedTankerId) {
+    const activeTankerId = selectedTankerId || selectableVehicles[0]?.id || '';
+    if (!activeTankerId) {
       tankerSelectRef.current?.focus();
-      window.alert('Lütfen kayıt eklemek için Tanker / Araç seçin.');
+      await alertDialog('Lütfen kayıt eklemek için Tanker / Araç seçin.', 'Araç Seçimi Gerekli');
       return;
     }
 
-    const chosen = selectableVehicles.find((v) => v.id === selectedTankerId);
+    const chosen = selectableVehicles.find((v) => v.id === activeTankerId);
     const liters = parseNum(litersInput);
     const cashAmt = parseNum(cashInput);
     const cardAmt = parseNum(cardInput);
@@ -224,7 +237,10 @@ export const VillageTankersModule: React.FC = () => {
 
     if (liters <= 0 && totalSale <= 0 && creditCollAmt <= 0 && !noteInput.trim()) {
       litersInputRef.current?.focus();
-      window.alert('Lütfen satılan mazot (litre), satış tutarı veya tahsilat bilgisi girin.');
+      await alertDialog(
+        'Lütfen satılan mazot (litre), satış tutarı veya tahsilat bilgisi girin.',
+        'Eksik Satış Bilgisi'
+      );
       return;
     }
 
@@ -232,7 +248,7 @@ export const VillageTankersModule: React.FC = () => {
 
     await api.saveVillageTankerLog({
       id: editingLogId || undefined,
-      tanker_id: selectedTankerId,
+      tanker_id: activeTankerId,
       tanker_name: chosen?.label || chosen?.plate || 'Köy Tankeri',
       plate_or_code: chosen?.plate || '',
       log_date: logDate || getCurrentDate(),
@@ -266,18 +282,16 @@ export const VillageTankersModule: React.FC = () => {
   };
 
   // Top-right "Yeni kayıt" button handler:
-  // - If user is editing an existing record and clicks "Yeni kayıt", it switches to a fresh blank form (or saves if new data was entered).
   // - If user entered data in the form and clicks "Yeni kayıt", it saves the record immediately!
-  // - If form is empty, it resets & focuses the Tanker/Araç dropdown so user can enter a new record immediately.
+  // - If user is editing an existing record or form is empty, it resets & focuses the input so user can enter a new record immediately.
   const handleTopNewRecordButton = async () => {
     const hasAnyValue =
-      Boolean(selectedTankerId) &&
-      (parseNum(litersInput) > 0 ||
-        parseNum(cashInput) > 0 ||
-        parseNum(cardInput) > 0 ||
-        parseNum(creditSaleInput) > 0 ||
-        parseNum(creditCollectedInput) > 0 ||
-        noteInput.trim().length > 0);
+      parseNum(litersInput) > 0 ||
+      parseNum(cashInput) > 0 ||
+      parseNum(cardInput) > 0 ||
+      parseNum(creditSaleInput) > 0 ||
+      parseNum(creditCollectedInput) > 0 ||
+      noteInput.trim().length > 0;
 
     if (!editingLogId && hasAnyValue) {
       await saveCurrentRecord();
@@ -289,7 +303,7 @@ export const VillageTankersModule: React.FC = () => {
   };
 
   const handleDeleteLog = async (id: string) => {
-    if (!window.confirm('Bu günlük satış kaydını silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Bu günlük satış kaydını silmek istediğinize emin misiniz?', 'Satış Kaydı Silme Onayı'))) return;
     await api.deleteVillageTankerLog(id);
     if (editingLogId === id) resetForm();
     loadData();

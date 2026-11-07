@@ -121,8 +121,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
               {!isCollapsed && (
                 <div className="min-w-0">
-                  <h1 className="font-bold text-sm tracking-tight leading-tight truncate">
-                    Nakliye Defterim
+                  <h1 className="font-extrabold text-sm tracking-tight leading-tight truncate">
+                    NAKLİYE <span style={{ color: 'var(--green)' }}>DEFTERİM</span>
                   </h1>
                   <span
                     className="text-[10px] font-semibold tracking-wider uppercase block truncate"

@@ -12,6 +12,7 @@ import {
 import { Customer } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate } from '../utils/format';
+import { alertDialog } from '../utils/dialog';
 
 interface WhatsAppModuleProps {
   initialCustomerId?: string | null;
@@ -85,11 +86,11 @@ export const WhatsAppModule: React.FC<WhatsAppModuleProps> = ({ initialCustomerI
     setTimeout(() => setPhoneSavedMsg(false), 2500);
   };
 
-  const handleOpenWhatsAppApp = () => {
+  const handleOpenWhatsAppApp = async () => {
     if (!selectedCustomer) return;
     const targetPhone = normalizeTrPhone(editingPhone || selectedCustomer.phone);
     if (!targetPhone) {
-      window.alert('Lütfen müşterinin profil telefon numarasını girin.');
+      await alertDialog('Lütfen müşterinin profil telefon numarasını girin.', 'Telefon Numarası Eksik');
       return;
     }
     // Opens WhatsApp Desktop application directly with phone & pre-filled message without auto-sending
@@ -97,11 +98,11 @@ export const WhatsAppModule: React.FC<WhatsAppModuleProps> = ({ initialCustomerI
     api.openExternal(appUrl);
   };
 
-  const handleOpenWhatsAppWeb = () => {
+  const handleOpenWhatsAppWeb = async () => {
     if (!selectedCustomer) return;
     const targetPhone = normalizeTrPhone(editingPhone || selectedCustomer.phone);
     if (!targetPhone) {
-      window.alert('Lütfen müşterinin profil telefon numarasını girin.');
+      await alertDialog('Lütfen müşterinin profil telefon numarasını girin.', 'Telefon Numarası Eksik');
       return;
     }
     const webUrl = `https://wa.me/${targetPhone}?text=${encodeURIComponent(messageText)}`;

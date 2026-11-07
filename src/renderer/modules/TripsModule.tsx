@@ -15,6 +15,7 @@ import {
 import { Trip, TripStop, Vehicle, Customer, Driver, TripStatus } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getCurrentDate } from '../utils/format';
+import { confirmDialog } from '../utils/dialog';
 
 interface TripsModuleProps {
   selectedMonth: string;
@@ -208,7 +209,7 @@ export const TripsModule: React.FC<TripsModuleProps> = ({
   };
 
   const handleDeleteTrip = async (tripId: string) => {
-    if (!window.confirm('Bu seferi ve bağlı durak kayıtlarını silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Bu seferi ve bağlı durak kayıtlarını silmek istediğinize emin misiniz?', 'Sefer Silme Onayı'))) return;
     await api.deleteTrip(tripId);
     loadAll();
   };

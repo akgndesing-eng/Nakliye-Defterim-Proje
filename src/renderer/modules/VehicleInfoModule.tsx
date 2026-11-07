@@ -15,6 +15,7 @@ import {
 import { Vehicle, Driver } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatDate, getDaysRemaining } from '../utils/format';
+import { confirmDialog } from '../utils/dialog';
 
 interface VehicleInfoModuleProps {
   highlightVehicleId?: string | null;
@@ -65,7 +66,7 @@ export const VehicleInfoModule: React.FC<VehicleInfoModuleProps> = ({ highlightV
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Bu araç künyesini silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Bu araç künyesini silmek istediğinize emin misiniz?', 'Araç Künyesi Silme Onayı'))) return;
     await api.deleteVehicle(id);
     loadData();
   };

@@ -30,7 +30,7 @@ function createWindow(): void {
     }
   });
 
-  const isDev = process.env.NODE_ENV === 'development' || (!app.isPackaged && !process.env.PROD_TEST);
+  const isDev = process.env.NODE_ENV === 'development';
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173').catch(() => {

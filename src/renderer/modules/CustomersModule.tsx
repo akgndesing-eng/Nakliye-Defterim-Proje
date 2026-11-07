@@ -16,6 +16,7 @@ import {
 import { Customer, CustomerDetailProfile, NavTabId } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getCurrentDate } from '../utils/format';
+import { confirmDialog } from '../utils/dialog';
 
 interface CustomersModuleProps {
   initialCustomerId?: string | null;
@@ -91,7 +92,7 @@ export const CustomersModule: React.FC<CustomersModuleProps> = ({
   };
 
   const handleDeleteCustomer = async (id: string) => {
-    if (!window.confirm('Müşteri kaydını silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Müşteri kaydını silmek istediğinize emin misiniz?', 'Müşteri Silme Onayı'))) return;
     await api.deleteCustomer(id);
     setSelectedId(null);
     loadCustomers();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Fuel,
@@ -12,6 +12,7 @@ import {
 import { Vehicle, VehicleExpense } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getDaysRemaining, getCurrentDate } from '../utils/format';
+import { confirmDialog } from '../utils/dialog';
 
 interface VehiclesModuleProps {
   selectedMonth: string;
@@ -36,6 +37,8 @@ export const VehiclesModule: React.FC<VehiclesModuleProps> = ({
   const [expDate, setExpDate] = useState(getCurrentDate());
   const [expTitle, setExpTitle] = useState('');
   const [expAmount, setExpAmount] = useState<string>('');
+  const expFormRef = useRef<HTMLDivElement>(null);
+  const expTitleInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = async () => {
     const [vList, eList] = await Promise.all([
@@ -67,7 +70,7 @@ export const VehiclesModule: React.FC<VehiclesModuleProps> = ({
   };
 
   const handleDeleteVehicle = async (id: string) => {
-    if (!window.confirm('Bu aracı ve bağlı gider kayıtlarını silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Bu aracı ve bağlı gider kayıtlarını silmek istediğinize emin misiniz?', 'Araç Silme Onayı'))) return;
     await api.deleteVehicle(id);
     loadData();
   };
@@ -89,6 +92,7 @@ export const VehiclesModule: React.FC<VehiclesModuleProps> = ({
   };
 
   const handleDeleteExpense = async (id: string) => {
+    if (!(await confirmDialog('Bu araç gider kaydını silmek istediğinize emin misiniz?', 'Gider Silme Onayı'))) return;
     await api.deleteVehicleExpense(id);
     loadData();
   };
@@ -156,7 +160,7 @@ export const VehiclesModule: React.FC<VehiclesModuleProps> = ({
       </div>
 
       {/* Hızlı Araç Gideri Ekleme Kutusu */}
-      <div className="nd-card p-5">
+      <div ref={expFormRef} className="nd-card p-5">
         <div className="flex items-center gap-2 mb-3">
           <Wrench size={16} style={{ color: 'var(--accent)' }} />
           <div>
@@ -198,6 +202,7 @@ export const VehiclesModule: React.FC<VehiclesModuleProps> = ({
           <div className="md:col-span-4">
             <label className="block font-semibold mb-1">Gider / Masraf Açıklaması</label>
             <input
+              ref={expTitleInputRef}
               type="text"
               required
               value={expTitle}
@@ -304,7 +309,11 @@ export const VehiclesModule: React.FC<VehiclesModuleProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setExpVehicleId(v.id)}
+                      onClick={() => {
+                        setExpVehicleId(v.id);
+                        expFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        setTimeout(() => expTitleInputRef.current?.focus(), 180);
+                      }}
                       className="text-[11px] font-semibold hover:underline"
                       style={{ color: 'var(--accent)' }}
                     >

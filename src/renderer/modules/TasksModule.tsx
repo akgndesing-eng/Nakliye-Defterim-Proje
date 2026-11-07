@@ -14,6 +14,7 @@ import {
 import { TaskItem, Vehicle, Customer, Driver } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatDate, getCurrentDate } from '../utils/format';
+import { confirmDialog } from '../utils/dialog';
 
 export const TasksModule: React.FC = () => {
   const [tasks, setTasks] = useState<TaskItem[]>(() => getCached<TaskItem[]>('tasks') || []);
@@ -81,7 +82,7 @@ export const TasksModule: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Bu görevi silmek istediğinize emin misiniz?')) return;
+    if (!(await confirmDialog('Bu görevi silmek istediğinize emin misiniz?', 'Görev Silme Onayı'))) return;
     await api.deleteTask(id);
     loadData();
   };
