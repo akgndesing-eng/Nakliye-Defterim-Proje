@@ -161,7 +161,9 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
   storageKey,
   presets
 }) => {
-  const isElectron = typeof window !== 'undefined' && Boolean((window as any).electronAPI);
+  const isElectron =
+    typeof window !== 'undefined' &&
+    (Boolean((window as any).api) || navigator.userAgent.includes('Electron'));
   const [currentUrl, setCurrentUrl] = useState<string>(() => {
     try {
       return localStorage.getItem(storageKey) || initialUrl;
@@ -314,24 +316,27 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
       </div>
 
       {/* Live Website Viewport */}
-      <div className="flex-1 w-full bg-white relative overflow-hidden">
+      <div className="flex-1 w-full bg-[#141A17] relative overflow-hidden flex">
         {isElectron ? (
           React.createElement('webview' as any, {
             ref: webviewRef,
             key: reloadCounter,
             src: currentUrl,
             partition: 'persist:nakliye_tracking_v45',
-            allowpopups: 'true',
-            useragent:
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-            style: { width: '100%', height: '100%', border: 'none' }
+            style: {
+              display: 'inline-flex',
+              width: '100%',
+              height: '100%',
+              flex: '1 1 auto',
+              border: 'none'
+            }
           })
         ) : (
           <iframe
             key={`${currentUrl}-${reloadCounter}`}
             src={currentUrl}
             title={title}
-            className="w-full h-full border-0"
+            className="w-full h-full border-0 flex-1"
             allow="geolocation *; fullscreen *"
           />
         )}
@@ -725,21 +730,42 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
 
       {/* =========================================================================
           PERSISTENTLY MOUNTED MOBILIZ & RENAULT LIVE WEB PORTALS
-          (Using CSS visibility/grid so your login session never resets when switching tabs!)
+          (Never using display:none so Electron <webview> guest processes initialize immediately!)
          ========================================================================= */}
       <div
         className={
+          screenTab === 'split_sites'
+            ? 'grid grid-cols-1 xl:grid-cols-2 gap-3.5 relative'
+            : 'relative'
+        }
+        style={
           screenTab === 'internal_map'
-            ? 'hidden'
-            : screenTab === 'split_sites'
-            ? 'grid grid-cols-1 xl:grid-cols-2 gap-3.5'
-            : 'block'
+            ? {
+                position: 'fixed',
+                left: '-9999px',
+                top: 0,
+                width: '1024px',
+                height: '700px',
+                opacity: 0,
+                pointerEvents: 'none'
+              }
+            : undefined
         }
       >
         {/* MOBILIZ LIVE WEBSITE VIEWPORT */}
         <div
-          className={
-            screenTab === 'mobiliz_site' || screenTab === 'split_sites' ? 'block' : 'hidden'
+          style={
+            screenTab === 'mobiliz_site' || screenTab === 'split_sites'
+              ? undefined
+              : {
+                  position: 'fixed',
+                  left: '-9999px',
+                  top: 0,
+                  width: '900px',
+                  height: '650px',
+                  opacity: 0,
+                  pointerEvents: 'none'
+                }
           }
         >
           <EmbeddedPortalBox
@@ -747,33 +773,39 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
             badgeText="MOBİLİZ CANLI EKRAN"
             badgeClass="nd-badge-champagne"
             initialUrl="https://ng.mobiliz.com.tr"
-            storageKey="nd_portal_url_mobiliz"
+            storageKey="nd_portal_url_mobiliz_v2"
             presets={[
-              { label: 'Mobiliz Yeni Panel (ng.mobiliz.com.tr)', url: 'https://ng.mobiliz.com.tr' },
-              { label: 'Mobiliz Ana Sayfa (mobiliz.com.tr)', url: 'https://www.mobiliz.com.tr' }
+              { label: 'Mobiliz Giriş Paneli (ng.mobiliz.com.tr)', url: 'https://ng.mobiliz.com.tr' },
+              { label: 'Mobiliz Web (mobiliz.com.tr)', url: 'https://www.mobiliz.com.tr' }
             ]}
           />
         </div>
 
         {/* RENAULT OPTIFLEET LIVE WEBSITE VIEWPORT */}
         <div
-          className={
-            screenTab === 'renault_site' || screenTab === 'split_sites' ? 'block' : 'hidden'
+          style={
+            screenTab === 'renault_site' || screenTab === 'split_sites'
+              ? undefined
+              : {
+                  position: 'fixed',
+                  left: '-9999px',
+                  top: 0,
+                  width: '900px',
+                  height: '650px',
+                  opacity: 0,
+                  pointerEvents: 'none'
+                }
           }
         >
           <EmbeddedPortalBox
             title="Renault Trucks Optifleet (Aracın Kendi Takip Sistemi)"
             badgeText="RENAULT OPTIFLEET CANLI EKRAN"
             badgeClass="nd-badge-green"
-            initialUrl="https://optifleet.net"
-            storageKey="nd_portal_url_renault"
+            initialUrl="https://www.volvoconnect.com"
+            storageKey="nd_portal_url_renault_v2"
             presets={[
-              { label: 'Renault Optifleet Portal (optifleet.net)', url: 'https://optifleet.net' },
-              { label: 'Volvo / Renault Connect Portal', url: 'https://www.volvoconnect.com' },
-              {
-                label: 'Renault Trucks Türkiye',
-                url: 'https://www.renault-trucks.com.tr/optifleet'
-              }
+              { label: 'Renault / Volvo Connect Giriş', url: 'https://www.volvoconnect.com' },
+              { label: 'Optifleet Portal (optifleet.net)', url: 'https://optifleet.net' }
             ]}
           />
         </div>
