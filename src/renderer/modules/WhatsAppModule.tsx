@@ -42,13 +42,13 @@ export const WhatsAppModule: React.FC<WhatsAppModuleProps> = ({ initialCustomerI
   };
 
   const loadList = async () => {
-    const all = await api.getCustomers();
-    const withBalance = (all || []).filter((c) => c.current_balance > 0);
+    const all: Customer[] = (await api.getCustomers()) || [];
+    const withBalance = all.filter((c: Customer) => c.current_balance > 0);
     setCustomers(withBalance);
 
     const target =
-      withBalance.find((c) => c.id === initialCustomerId) ||
-      (selectedCustomer && withBalance.find((c) => c.id === selectedCustomer.id)) ||
+      withBalance.find((c: Customer) => c.id === initialCustomerId) ||
+      (selectedCustomer && withBalance.find((c: Customer) => c.id === selectedCustomer.id)) ||
       withBalance[0] ||
       null;
 

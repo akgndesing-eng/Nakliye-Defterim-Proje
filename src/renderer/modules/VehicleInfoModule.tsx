@@ -12,13 +12,14 @@ import {
   Search,
   X
 } from 'lucide-react';
-import { Vehicle, Driver } from '../../shared/types';
+import { Vehicle, Driver, NavTabId } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatDate, getDaysRemaining } from '../utils/format';
-import { confirmDialog } from '../utils/dialog';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 interface VehicleInfoModuleProps {
   highlightVehicleId?: string | null;
+  onNavigate?: (tab: NavTabId, entityId?: string) => void;
 }
 
 export const VehicleInfoModule: React.FC<VehicleInfoModuleProps> = ({ highlightVehicleId }) => {
@@ -59,7 +60,10 @@ export const VehicleInfoModule: React.FC<VehicleInfoModuleProps> = ({ highlightV
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editing.plate?.trim()) return;
+    if (!editing.plate?.trim()) {
+      await alertDialog('Lütfen araç plakasını girin.', 'Eksik Bilgi');
+      return;
+    }
     await api.saveVehicle(editing);
     setShowModal(false);
     loadData();

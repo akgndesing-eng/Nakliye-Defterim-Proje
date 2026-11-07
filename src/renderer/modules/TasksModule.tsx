@@ -14,7 +14,7 @@ import {
 import { TaskItem, Vehicle, Customer, Driver } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatDate, getCurrentDate } from '../utils/format';
-import { confirmDialog } from '../utils/dialog';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 export const TasksModule: React.FC = () => {
   const [tasks, setTasks] = useState<TaskItem[]>(() => getCached<TaskItem[]>('tasks') || []);
@@ -65,7 +65,10 @@ export const TasksModule: React.FC = () => {
 
   const handleSaveTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingTask.title?.trim()) return;
+    if (!editingTask.title?.trim()) {
+      await alertDialog('Lütfen görev başlığını girin.', 'Eksik Bilgi');
+      return;
+    }
     await api.saveTask({
       ...editingTask,
       customer_id: editingTask.customer_id || null,

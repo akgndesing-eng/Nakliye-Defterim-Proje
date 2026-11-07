@@ -12,7 +12,7 @@ import {
 import { Vehicle, VehicleExpense } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getDaysRemaining, getCurrentDate } from '../utils/format';
-import { confirmDialog } from '../utils/dialog';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 interface VehiclesModuleProps {
   selectedMonth: string;
@@ -77,10 +77,18 @@ export const VehiclesModule: React.FC<VehiclesModuleProps> = ({
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    const targetVehId = expVehicleId || vehicles[0]?.id || '';
     const numericAmt = parseFloat(String(expAmount).replace(',', '.')) || 0;
-    if (!expVehicleId || !expTitle.trim() || numericAmt <= 0) return;
+    if (!targetVehId) {
+      await alertDialog('Lütfen önce bir araç ekleyin veya araç seçin.', 'Eksik Bilgi');
+      return;
+    }
+    if (!expTitle.trim() || numericAmt <= 0) {
+      await alertDialog('Lütfen gider açıklamasını ve 0 TL üzeri gider tutarını girin.', 'Eksik Bilgi');
+      return;
+    }
     await api.saveVehicleExpense({
-      vehicle_id: expVehicleId,
+      vehicle_id: targetVehId,
       expense_date: expDate,
       expense_month: selectedMonth,
       title: expTitle.trim(),

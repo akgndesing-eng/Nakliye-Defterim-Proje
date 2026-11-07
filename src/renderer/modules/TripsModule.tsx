@@ -15,7 +15,7 @@ import {
 import { Trip, TripStop, Vehicle, Customer, Driver, TripStatus } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getCurrentDate } from '../utils/format';
-import { confirmDialog } from '../utils/dialog';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 interface TripsModuleProps {
   selectedMonth: string;
@@ -181,12 +181,16 @@ export const TripsModule: React.FC<TripsModuleProps> = ({
 
   const handleSaveTrip = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!vehicleId) return;
+    const resolvedVehicleId = vehicleId || vehicles[0]?.id || '';
+    if (!resolvedVehicleId) {
+      await alertDialog('Lütfen önce Araçlar sekmesinden en az bir araç ekleyin veya araç seçin.', 'Eksik Bilgi');
+      return;
+    }
     await api.saveTrip({
       id: editingId || undefined,
       trip_no: tripNo,
       trip_date: tripDate,
-      vehicle_id: vehicleId,
+      vehicle_id: resolvedVehicleId,
       driver_name: driverName,
       origin,
       destination,
@@ -197,7 +201,11 @@ export const TripsModule: React.FC<TripsModuleProps> = ({
       other_cost: Number(otherCost || 0),
       invoice_status: invoiceStatus,
       notes,
-      stops
+      stops: stops.map((s, idx) => ({
+        ...s,
+        stop_order: idx + 1,
+        customer_id: s.customer_id || customers[0]?.id || ''
+      }))
     });
     setShowModal(false);
     loadAll();

@@ -3,6 +3,7 @@ import { Wallet, CheckCircle2, AlertTriangle, Clock, Plus, X, ArrowUpRight } fro
 import { TripStop, NavTabId } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getCurrentDate } from '../utils/format';
+import { alertDialog } from '../utils/dialog';
 
 interface PaymentsModuleProps {
   onOpenCustomerProfile: (customerId: string) => void;
@@ -54,7 +55,11 @@ export const PaymentsModule: React.FC<PaymentsModuleProps> = ({ onOpenCustomerPr
 
   const handleConfirmPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStop || paymentAmount <= 0) return;
+    if (!selectedStop) return;
+    if (paymentAmount <= 0) {
+      await alertDialog('Lütfen 0 TL üzeri geçerli bir tahsilat tutarı girin.', 'Geçersiz Tutar');
+      return;
+    }
     await api.collectStopPayment({
       stop_id: selectedStop.id,
       payment_amount: Number(paymentAmount),

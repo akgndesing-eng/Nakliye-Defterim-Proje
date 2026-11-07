@@ -16,7 +16,7 @@ import {
 import { Customer, CustomerDetailProfile, NavTabId } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getCurrentDate } from '../utils/format';
-import { confirmDialog } from '../utils/dialog';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 interface CustomersModuleProps {
   initialCustomerId?: string | null;
@@ -100,7 +100,10 @@ export const CustomersModule: React.FC<CustomersModuleProps> = ({
 
   const handleSaveManualTx = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedId || txAmount <= 0) return;
+    if (!selectedId || txAmount <= 0) {
+      await alertDialog('Lütfen 0 TL üzeri geçerli bir işlem tutarı girin.', 'Eksik Bilgi');
+      return;
+    }
     await api.addCustomerTransaction({
       customer_id: selectedId,
       tx_type: txType,
@@ -116,7 +119,10 @@ export const CustomersModule: React.FC<CustomersModuleProps> = ({
 
   const handleAddCustomerNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedId || !noteTitle.trim()) return;
+    if (!selectedId || !noteTitle.trim()) {
+      await alertDialog('Lütfen not başlığını girin.', 'Eksik Bilgi');
+      return;
+    }
     await api.saveReminderNote({
       title: noteTitle,
       content: noteContent,

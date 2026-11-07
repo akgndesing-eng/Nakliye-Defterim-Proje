@@ -172,48 +172,102 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
     }
   });
   const [urlInput, setUrlInput] = useState<string>(currentUrl);
+  const [historyStack, setHistoryStack] = useState<string[]>([currentUrl]);
+  const [historyIndex, setHistoryIndex] = useState<number>(0);
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [reloadCounter, setReloadCounter] = useState<number>(0);
   const webviewRef = useRef<any>(null);
 
-  const navigateTo = (targetUrl: string) => {
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!isElectron || !wv) return;
+    const handleNav = (e: any) => {
+      if (e?.url && typeof e.url === 'string' && e.url.startsWith('http')) {
+        setUrlInput(e.url);
+      }
+    };
+    try {
+      wv.addEventListener('did-navigate', handleNav);
+      wv.addEventListener('did-navigate-in-page', handleNav);
+    } catch {}
+    return () => {
+      try {
+        wv.removeEventListener('did-navigate', handleNav);
+        wv.removeEventListener('did-navigate-in-page', handleNav);
+      } catch {}
+    };
+  }, [isElectron, currentUrl, reloadCounter]);
+
+  const navigateTo = (targetUrl: string, pushToHistory = true) => {
     let formatted = targetUrl.trim();
+    if (!formatted) return;
     if (!formatted.startsWith('http://') && !formatted.startsWith('https://')) {
       formatted = 'https://' + formatted;
     }
     setCurrentUrl(formatted);
     setUrlInput(formatted);
+    if (pushToHistory) {
+      setHistoryStack((prev) => {
+        const sliced = prev.slice(0, historyIndex + 1);
+        if (sliced[sliced.length - 1] === formatted) return sliced;
+        return [...sliced, formatted];
+      });
+      setHistoryIndex((prev) => prev + 1);
+    }
     try {
       localStorage.setItem(storageKey, formatted);
     } catch {}
-    if (isElectron && webviewRef.current) {
-      try {
-        webviewRef.current.loadURL(formatted);
-      } catch {}
-    }
+    setReloadCounter((c) => c + 1);
   };
 
   const handleGoBack = () => {
     if (isElectron && webviewRef.current) {
       try {
-        if (webviewRef.current.canGoBack()) webviewRef.current.goBack();
+        if (typeof webviewRef.current.canGoBack === 'function' && webviewRef.current.canGoBack()) {
+          webviewRef.current.goBack();
+          return;
+        }
       } catch {}
+    }
+    if (historyIndex > 0) {
+      const nextIdx = historyIndex - 1;
+      const prevUrl = historyStack[nextIdx];
+      if (prevUrl) {
+        setHistoryIndex(nextIdx);
+        navigateTo(prevUrl, false);
+      }
     }
   };
 
   const handleGoForward = () => {
     if (isElectron && webviewRef.current) {
       try {
-        if (webviewRef.current.canGoForward()) webviewRef.current.goForward();
+        if (
+          typeof webviewRef.current.canGoForward === 'function' &&
+          webviewRef.current.canGoForward()
+        ) {
+          webviewRef.current.goForward();
+          return;
+        }
       } catch {}
+    }
+    if (historyIndex < historyStack.length - 1) {
+      const nextIdx = historyIndex + 1;
+      const nextUrl = historyStack[nextIdx];
+      if (nextUrl) {
+        setHistoryIndex(nextIdx);
+        navigateTo(nextUrl, false);
+      }
     }
   };
 
   const handleReload = () => {
     if (isElectron && webviewRef.current) {
       try {
-        webviewRef.current.reload();
-        return;
+        if (typeof webviewRef.current.reload === 'function') {
+          webviewRef.current.reload();
+          return;
+        }
       } catch {}
     }
     setReloadCounter((c) => c + 1);
@@ -245,13 +299,14 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
         {/* Preset Quick Switch Buttons */}
         <div className="flex flex-wrap items-center gap-1.5">
           {presets.map((p, idx) => {
-            const active = currentUrl.includes(p.url.replace('https://', '').replace('www.', ''));
+            const cleanPresetHost = p.url.replace('https://', '').replace('http://', '').replace('www.', '');
+            const active = urlInput.includes(cleanPresetHost) || currentUrl.includes(cleanPresetHost);
             return (
               <button
                 key={idx}
                 type="button"
                 onClick={() => navigateTo(p.url)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                   active ? 'nd-btn-primary' : 'nd-layer hover:opacity-100 opacity-85'
                 }`}
               >
@@ -266,7 +321,7 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
           <button
             type="button"
             onClick={handleGoBack}
-            className="p-1.5 rounded-lg nd-layer"
+            className="p-1.5 rounded-lg nd-layer cursor-pointer"
             title="Geri"
           >
             <ArrowLeft size={14} />
@@ -274,7 +329,7 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
           <button
             type="button"
             onClick={handleGoForward}
-            className="p-1.5 rounded-lg nd-layer"
+            className="p-1.5 rounded-lg nd-layer cursor-pointer"
             title="İleri"
           >
             <ArrowRight size={14} />
@@ -282,7 +337,7 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
           <button
             type="button"
             onClick={handleReload}
-            className="p-1.5 rounded-lg nd-layer"
+            className="p-1.5 rounded-lg nd-layer cursor-pointer"
             title="Sayfayı Yenile"
           >
             <RefreshCw size={14} />
@@ -307,7 +362,7 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
           <button
             type="button"
             onClick={() => setIsMaximized((prev) => !prev)}
-            className="p-1.5 rounded-lg nd-layer"
+            className="p-1.5 rounded-lg nd-layer cursor-pointer"
             title={isMaximized ? 'Normal Boyuta Dön' : 'Ekranı Büyüt'}
           >
             {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
@@ -320,9 +375,10 @@ const EmbeddedPortalBox: React.FC<EmbeddedPortalBoxProps> = ({
         {isElectron ? (
           React.createElement('webview' as any, {
             ref: webviewRef,
-            key: reloadCounter,
+            key: `${storageKey}-${reloadCounter}`,
             src: currentUrl,
             partition: 'persist:nakliye_tracking_v45',
+            allowpopups: 'true',
             style: {
               display: 'inline-flex',
               width: '100%',
@@ -393,16 +449,25 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
     setLoading(true);
     try {
       const [vList, dList, tList] = await Promise.all([
-        api.listVehicles(),
-        api.listDrivers(),
-        api.listTrips()
+        api.getVehicles(),
+        api.getDrivers(),
+        api.getTrips()
       ]);
-      setVehicles(vList);
-      setDrivers(dList);
-      setTrips(tList);
-      if (vList.length > 0 && !selectedVehicleId) {
+      setVehicles(vList || []);
+      setDrivers(dList || []);
+      setTrips(tList || []);
+      if (vList && vList.length > 0 && !selectedVehicleId) {
         setSelectedVehicleId(vList[0].id);
       }
+      setLastSyncTime(
+        new Date().toLocaleTimeString('tr-TR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })
+      );
+    } catch (err) {
+      console.error('VehicleTrackingModule load error:', err);
     } finally {
       setLoading(false);
     }
@@ -729,87 +794,49 @@ export const VehicleTrackingModule: React.FC<VehicleTrackingModuleProps> = ({ on
       </div>
 
       {/* =========================================================================
-          PERSISTENTLY MOUNTED MOBILIZ & RENAULT LIVE WEB PORTALS
-          (Never using display:none so Electron <webview> guest processes initialize immediately!)
+          MOBILIZ & RENAULT LIVE WEB PORTALS (RENDERED DIRECTLY IN ACTIVE TAB)
          ========================================================================= */}
-      <div
-        className={
-          screenTab === 'split_sites'
-            ? 'grid grid-cols-1 xl:grid-cols-2 gap-3.5 relative'
-            : 'relative'
-        }
-        style={
-          screenTab === 'internal_map'
-            ? {
-                position: 'fixed',
-                left: '-9999px',
-                top: 0,
-                width: '1024px',
-                height: '700px',
-                opacity: 0,
-                pointerEvents: 'none'
-              }
-            : undefined
-        }
-      >
-        {/* MOBILIZ LIVE WEBSITE VIEWPORT */}
+      {screenTab !== 'internal_map' && (
         <div
-          style={
-            screenTab === 'mobiliz_site' || screenTab === 'split_sites'
-              ? undefined
-              : {
-                  position: 'fixed',
-                  left: '-9999px',
-                  top: 0,
-                  width: '900px',
-                  height: '650px',
-                  opacity: 0,
-                  pointerEvents: 'none'
-                }
+          className={
+            screenTab === 'split_sites'
+              ? 'grid grid-cols-1 xl:grid-cols-2 gap-3.5 relative'
+              : 'relative'
           }
         >
-          <EmbeddedPortalBox
-            title="Mobiliz Araç Takip Sistemi"
-            badgeText="MOBİLİZ CANLI EKRAN"
-            badgeClass="nd-badge-champagne"
-            initialUrl="https://ng.mobiliz.com.tr"
-            storageKey="nd_portal_url_mobiliz_v2"
-            presets={[
-              { label: 'Mobiliz Giriş Paneli (ng.mobiliz.com.tr)', url: 'https://ng.mobiliz.com.tr' },
-              { label: 'Mobiliz Web (mobiliz.com.tr)', url: 'https://www.mobiliz.com.tr' }
-            ]}
-          />
-        </div>
+          {/* MOBILIZ LIVE WEBSITE VIEWPORT */}
+          {(screenTab === 'mobiliz_site' || screenTab === 'split_sites') && (
+            <EmbeddedPortalBox
+              key="mobiliz-portal-box"
+              title="Mobiliz Araç Takip Sistemi"
+              badgeText="MOBİLİZ CANLI EKRAN"
+              badgeClass="nd-badge-champagne"
+              initialUrl="https://ng.mobiliz.com.tr"
+              storageKey="nd_portal_url_mobiliz_v2"
+              presets={[
+                { label: 'Mobiliz Giriş Paneli (ng.mobiliz.com.tr)', url: 'https://ng.mobiliz.com.tr' },
+                { label: 'Mobiliz Web (mobiliz.com.tr)', url: 'https://www.mobiliz.com.tr' }
+              ]}
+            />
+          )}
 
-        {/* RENAULT OPTIFLEET LIVE WEBSITE VIEWPORT */}
-        <div
-          style={
-            screenTab === 'renault_site' || screenTab === 'split_sites'
-              ? undefined
-              : {
-                  position: 'fixed',
-                  left: '-9999px',
-                  top: 0,
-                  width: '900px',
-                  height: '650px',
-                  opacity: 0,
-                  pointerEvents: 'none'
-                }
-          }
-        >
-          <EmbeddedPortalBox
-            title="Renault Trucks Optifleet (Aracın Kendi Takip Sistemi)"
-            badgeText="RENAULT OPTIFLEET CANLI EKRAN"
-            badgeClass="nd-badge-green"
-            initialUrl="https://www.volvoconnect.com"
-            storageKey="nd_portal_url_renault_v2"
-            presets={[
-              { label: 'Renault / Volvo Connect Giriş', url: 'https://www.volvoconnect.com' },
-              { label: 'Optifleet Portal (optifleet.net)', url: 'https://optifleet.net' }
-            ]}
-          />
+          {/* RENAULT OPTIFLEET LIVE WEBSITE VIEWPORT */}
+          {(screenTab === 'renault_site' || screenTab === 'split_sites') && (
+            <EmbeddedPortalBox
+              key="renault-portal-box"
+              title="Renault Trucks Optifleet (Aracın Kendi Takip Sistemi)"
+              badgeText="RENAULT OPTIFLEET CANLI EKRAN"
+              badgeClass="nd-badge-green"
+              initialUrl="https://www.volvoconnect.com"
+              storageKey="nd_portal_url_renault_v2"
+              presets={[
+                { label: 'Renault / Volvo Connect Giriş', url: 'https://www.volvoconnect.com' },
+                { label: 'Optifleet Portal (optifleet.net)', url: 'https://optifleet.net' }
+              ]}
+            />
+          )}
         </div>
-      </div>
+      )}
 
       {/* =========================================================================
           4TH TAB: INTERNAL FLEET MAP & TELEMETRY SUMMARY

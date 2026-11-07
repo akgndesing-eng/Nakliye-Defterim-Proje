@@ -14,7 +14,7 @@ import {
 import { ReminderNote, Customer } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatDate, getCurrentDate } from '../utils/format';
-import { confirmDialog } from '../utils/dialog';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 export const NotesModule: React.FC = () => {
   const [notes, setNotes] = useState<ReminderNote[]>(() => getCached<ReminderNote[]>('notes') || []);
@@ -57,7 +57,10 @@ export const NotesModule: React.FC = () => {
 
   const handleSaveNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingNote.title?.trim()) return;
+    if (!editingNote.title?.trim()) {
+      await alertDialog('Lütfen not başlığını girin.', 'Eksik Bilgi');
+      return;
+    }
     await api.saveReminderNote({
       ...editingNote,
       customer_id: editingNote.customer_id || null

@@ -25,7 +25,7 @@ import {
 } from '../../shared/types';
 import { api, getCached } from '../api';
 import { formatCurrency, formatDate, getCurrentMonth } from '../utils/format';
-import { confirmDialog } from '../utils/dialog';
+import { confirmDialog, alertDialog } from '../utils/dialog';
 
 export const PastMonthsModule: React.FC = () => {
   const currentMonth = getCurrentMonth();
@@ -104,7 +104,10 @@ export const PastMonthsModule: React.FC = () => {
 
   // Calculate live summary for selected archiveMonth (Vehicle extra expenses are isolated to Araçlar screen)
   const monthFreight = trips.reduce((acc, t) => acc + Number(t.total_freight || 0), 0);
-  const monthTripExpenses = trips.reduce((acc, t) => acc + Number(t.total_expenses || 0), 0);
+  const monthTripExpenses = trips.reduce(
+    (acc, t) => acc + Number(t.fuel_cost || 0) + Number(t.road_cost || 0) + Number(t.other_cost || 0),
+    0
+  );
   const monthVehicleExpenses = 0;
   const monthCollected = trips.reduce(
     (acc, t) =>
@@ -184,12 +187,20 @@ export const PastMonthsModule: React.FC = () => {
 
   const handleSavePastTrip = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!vehicleId || stops.length === 0) return;
+    const resolvedVehicleId = vehicleId || vehicles[0]?.id || '';
+    if (!resolvedVehicleId) {
+      await alertDialog('Lütfen önce Araçlar sekmesinden en az bir araç ekleyin veya araç seçin.', 'Eksik Bilgi');
+      return;
+    }
+    if (stops.length === 0) {
+      await alertDialog('Lütfen sefere en az 1 durak ekleyin.', 'Eksik Bilgi');
+      return;
+    }
     await api.saveTrip({
       id: editingTripId || undefined,
       trip_no: tripNo,
       trip_date: tripDate,
-      vehicle_id: vehicleId,
+      vehicle_id: resolvedVehicleId,
       driver_name: driverName,
       origin,
       destination,
@@ -202,6 +213,7 @@ export const PastMonthsModule: React.FC = () => {
       stops: stops.map((s, idx) => ({
         ...s,
         stop_order: idx + 1,
+        customer_id: s.customer_id || customers[0]?.id || '',
         quantity: Number(s.quantity || 0),
         stop_amount: Number(s.stop_amount || 0),
         paid_amount: Number(s.paid_amount || 0)
@@ -240,10 +252,15 @@ export const PastMonthsModule: React.FC = () => {
 
   const handleSaveExp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingExp.vehicle_id || !editingExp.title?.trim()) return;
+    const resolvedVehId = editingExp.vehicle_id || vehicles[0]?.id || '';
+    if (!resolvedVehId || !editingExp.title?.trim()) {
+      await alertDialog('Lütfen araç seçin ve gider başlığını girin.', 'Eksik Bilgi');
+      return;
+    }
     const expDate = editingExp.expense_date || `${archiveMonth}-10`;
     await api.saveVehicleExpense({
       ...editingExp,
+      vehicle_id: resolvedVehId,
       expense_date: expDate,
       expense_month: expDate.slice(0, 7),
       amount: Number(editingExp.amount || 0)
@@ -483,7 +500,11 @@ export const PastMonthsModule: React.FC = () => {
                         <span className="mx-2 opacity-30">|</span>
                         <span style={{ color: 'var(--text-muted)' }}>Gider: </span>
                         <b className="tabular-nums" style={{ color: 'var(--red)' }}>
-                          {formatCurrency(trip.total_expenses)}
+                          {formatCurrency(
+                            Number(trip.fuel_cost || 0) +
+                              Number(trip.road_cost || 0) +
+                              Number(trip.other_cost || 0)
+                          )}
                         </b>
                       </div>
 
