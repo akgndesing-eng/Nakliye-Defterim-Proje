@@ -206,6 +206,7 @@ export type NavTabId =
   | 'trips'
   | 'trip_cost_calc'
   | 'customers'
+  | 'vehicle_tracking'
   | 'vehicle_info'
   | 'vehicles'
   | 'village_tankers'

@@ -59,6 +59,10 @@ const TAB_TITLES: Record<NavTabId, { title: string; subtitle: string }> = {
     title: 'Müşteriler & İstasyon Carileri',
     subtitle: 'İstasyon profilleri, telefon bilgileri, sefer geçmişi, cari hesap ekstresi ve özel notlar'
   },
+  vehicle_tracking: {
+    title: 'Araç Takip — Mobiliz & Renault Optifleet Canlı Filo Haritası',
+    subtitle: 'Tüm tanker ve tırların anlık GPS konumu, hızı, kontak durumu, Renault CAN-Bus yakıt/AdBlue/KM verileri ve canlı rota takibi'
+  },
   vehicle_info: {
     title: 'Araç Bilgileri & Evrak Takip Sicili',
     subtitle: 'Plaka, kapasite, TÜVTÜRK muayene/vize, kasko/sigorta geri sayımları ve ADR teknik sicil kartları'

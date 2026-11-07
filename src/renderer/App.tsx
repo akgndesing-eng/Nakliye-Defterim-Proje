@@ -30,6 +30,7 @@ import { TripsModule } from './modules/TripsModule';
 import { TripCostCalculatorModule } from './modules/TripCostCalculatorModule';
 import { PaymentsModule } from './modules/PaymentsModule';
 import { CustomersModule } from './modules/CustomersModule';
+import { VehicleTrackingModule } from './modules/VehicleTrackingModule';
 import { VehicleInfoModule } from './modules/VehicleInfoModule';
 import { VehiclesModule } from './modules/VehiclesModule';
 import { VillageTankersModule } from './modules/VillageTankersModule';
@@ -441,6 +442,10 @@ export const App: React.FC = () => {
 
             {activeTab === 'whatsapp' && (
               <WhatsAppModule initialCustomerId={selectedCustomerId} />
+            )}
+
+            {activeTab === 'vehicle_tracking' && (
+              <VehicleTrackingModule onNavigate={handleNavigate} />
             )}
 
             {activeTab === 'vehicle_info' && (
