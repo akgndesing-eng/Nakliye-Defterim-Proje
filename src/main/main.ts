@@ -26,7 +26,8 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      webviewTag: true
     }
   });
 
@@ -50,6 +51,18 @@ function createWindow(): void {
 }
 
 app.whenReady().then(createWindow);
+
+// Keep all popups/redirects inside embedded <webview> tags (Mobiliz & Renault Optifleet login flows)
+app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() === 'webview') {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+        contents.loadURL(url).catch(() => {});
+      }
+      return { action: 'deny' };
+    });
+  }
+});
 
 app.on('window-all-closed', () => {
   closeDatabase();
