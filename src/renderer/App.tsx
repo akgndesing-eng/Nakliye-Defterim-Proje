@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CheckCircle2,
   AlertCircle,
@@ -91,6 +91,13 @@ export const App: React.FC = () => {
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [newTripSignal, setNewTripSignal] = useState<number>(0);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = 0;
+    }
+  }, [activeTab]);
 
   const showToast = useCallback((type: 'success' | 'error', message: string) => {
     setToast({ type, message });
@@ -318,7 +325,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="nd-page flex h-screen w-screen overflow-hidden">
+    <div className="nd-page flex h-full w-full overflow-hidden">
       {/* Collapsible Left Sidebar */}
       <Sidebar
         activeTab={activeTab}
@@ -351,7 +358,7 @@ export const App: React.FC = () => {
 
         {/* Floating Toast Notification */}
         {toast && (
-          <div className="fixed top-20 right-6 z-50 max-w-md nd-toast-enter">
+          <div className="fixed top-20 left-3 right-3 sm:left-auto sm:right-6 z-50 max-w-md nd-toast-enter">
             <div
               className={`p-3.5 rounded-xl shadow-2xl flex items-center gap-3 text-xs font-bold ${
                 toast.type === 'success' ? 'nd-badge-green' : 'nd-badge-red'
@@ -375,7 +382,7 @@ export const App: React.FC = () => {
         )}
 
         {/* Module Viewport with GPU-Accelerated Smooth Page Transition */}
-        <main className="flex-1 overflow-y-auto pb-28 md:pb-16">
+        <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-24 md:pb-16">
           <div key={activeTab} className="nd-page-transition">
             {activeTab === 'home' && (
               <HomeModule

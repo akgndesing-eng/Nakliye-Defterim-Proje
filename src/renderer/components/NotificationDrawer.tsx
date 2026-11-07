@@ -31,7 +31,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md h-full flex flex-col justify-between border-l p-5 overflow-y-auto"
+        className="w-full max-w-md h-full flex flex-col justify-between border-l p-5 overflow-y-auto nd-safe-top nd-safe-bottom"
         style={{
           backgroundColor: 'var(--surface)',
           borderColor: 'var(--border)',

@@ -225,38 +225,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Bottom Clean Vault Status & Settings Shortcut Pill */}
-        <div className="p-2 border-t shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="p-2 border-t shrink-0 space-y-1.5" style={{ borderColor: 'var(--border)' }}>
           {!isCollapsed ? (
-            <button
-              onClick={() => {
-                onSelectTab('settings');
-                if (onCloseMobile) onCloseMobile();
-              }}
-              className="w-full nd-layer nd-hover-accent p-2 flex items-center justify-between gap-2 text-left"
-              title="Ayarlar, Yedek Al, Yedek Aç ve Defteri Kilitle ekranına git"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <div
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0"
-                  style={{ backgroundColor: 'var(--accent)' }}
-                >
-                  <ShieldCheck size={15} />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: 'var(--champagne)' }}
-                    />
-                    <span className="text-[11px] font-bold truncate">Şifreli Kasa Aktif</span>
+            <>
+              <button
+                onClick={() => {
+                  onSelectTab('settings');
+                  if (onCloseMobile) onCloseMobile();
+                }}
+                className="w-full nd-layer nd-hover-accent p-2 flex items-center justify-between gap-2 text-left"
+                title="Ayarlar, Yedek Al, Yedek Aç ve Defteri Kilitle ekranına git"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <div
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0"
+                    style={{ backgroundColor: 'var(--accent)' }}
+                  >
+                    <ShieldCheck size={15} />
                   </div>
-                  <span className="text-[10px] block truncate" style={{ color: 'var(--text-muted)' }}>
-                    Yedekleme & Kilit → Ayarlar
-                  </span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: 'var(--champagne)' }}
+                      />
+                      <span className="text-[11px] font-bold truncate">Şifreli Kasa Aktif</span>
+                    </div>
+                    <span className="text-[10px] block truncate" style={{ color: 'var(--text-muted)' }}>
+                      Yedekleme & Kilit → Ayarlar
+                    </span>
+                  </div>
                 </div>
+                <ChevronRight size={13} style={{ color: 'var(--text-muted)' }} className="shrink-0" />
+              </button>
+
+              <div className="px-1.5 pt-0.5 text-center">
+                <p
+                  className="text-[10px] font-semibold tracking-tight leading-snug"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  Nakliye Defterim bir <span style={{ color: 'var(--champagne)' }}>Umut Ergil</span> uygulamasıdır{' '}
+                  <span className="font-bold" style={{ color: 'var(--text)' }}>
+                    -Akon Group
+                  </span>
+                </p>
               </div>
-              <ChevronRight size={13} style={{ color: 'var(--text-muted)' }} className="shrink-0" />
-            </button>
+            </>
           ) : (
             <button
               onClick={() => {

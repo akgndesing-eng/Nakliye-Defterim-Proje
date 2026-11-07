@@ -347,7 +347,7 @@ export const RoadRadioPlayer: React.FC = () => {
   });
 
   return (
-    <div className="fixed bottom-16 md:bottom-4 right-2.5 md:right-4 z-30 select-none">
+    <div className="fixed nd-radio-floating right-2.5 md:right-4 z-30 select-none">
       <audio
         ref={audioRef}
         preload="none"

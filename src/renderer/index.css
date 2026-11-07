@@ -61,11 +61,21 @@
     letter-spacing: -0.008em;
     line-height: 1.5;
     user-select: none;
+    -webkit-user-select: none;
     overflow: hidden;
     margin: 0;
-    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    padding: 0;
+    width: 100%;
+    height: 100dvh;
+    overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color 0.18s ease, color 0.18s ease;
+  }
+
+  #root {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
   }
 
   .tabular-nums,
@@ -82,22 +92,25 @@
     cursor: pointer;
     transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
+    touch-action: manipulation;
     transition:
-      transform 0.16s cubic-bezier(0.22, 1, 0.36, 1),
-      box-shadow 0.18s ease,
-      background-color 0.16s ease,
-      border-color 0.16s ease,
-      color 0.15s ease,
-      opacity 0.16s ease;
+      transform 0.14s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.16s ease,
+      background-color 0.14s ease,
+      border-color 0.14s ease,
+      color 0.14s ease,
+      opacity 0.14s ease;
   }
 
-  button:hover:not(:disabled) {
-    transform: translate3d(0, -1px, 0);
+  @media (hover: hover) {
+    button:hover:not(:disabled) {
+      transform: translate3d(0, -1px, 0);
+    }
   }
 
   button:active:not(:disabled) {
     transform: translate3d(0, 0.5px, 0) scale(0.975) !important;
-    transition-duration: 0.05s !important;
+    transition-duration: 0.04s !important;
   }
 
   button:disabled {
@@ -122,57 +135,38 @@
 }
 
 /* ============================================================
-   Short, Smooth & Restrained Page / Modal Animations
+   Ultra-Smooth 60/120Hz GPU Page & Modal Animations
    ============================================================ */
 @keyframes ndPageGlideIn {
   0% {
-    opacity: 0;
-    transform: translateY(5px);
+    opacity: 0.01;
+    transform: translate3d(0, 4px, 0);
   }
   100% {
     opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes ndCardCascade {
-  0% {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
+    transform: translate3d(0, 0, 0);
   }
 }
 
 @keyframes ndToastSlideIn {
   0% {
     opacity: 0;
-    transform: translate3d(16px, 0, 0);
+    transform: translate3d(14px, 0, 0);
   }
   100% {
     opacity: 1;
-    transform: none;
+    transform: translate3d(0, 0, 0);
   }
 }
 
 .nd-page-transition {
-  animation: ndPageGlideIn 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.nd-page-transition > div > *:not(.fixed):nth-child(1) {
-  animation: ndCardCascade 0.18s cubic-bezier(0.22, 1, 0.36, 1) 0.01s;
-}
-.nd-page-transition > div > *:not(.fixed):nth-child(2) {
-  animation: ndCardCascade 0.2s cubic-bezier(0.22, 1, 0.36, 1) 0.03s;
-}
-.nd-page-transition > div > *:not(.fixed):nth-child(3) {
-  animation: ndCardCascade 0.22s cubic-bezier(0.22, 1, 0.36, 1) 0.05s;
+  animation: ndPageGlideIn 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 .nd-toast-enter {
-  animation: ndToastSlideIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: ndToastSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* ============================================================
@@ -380,7 +374,16 @@ tbody tr:hover {
 /* ============================================================
    Universal Mobile Responsive Scaling & Proportions (All Phone Models)
    ============================================================ */
+.nd-radio-floating {
+  bottom: 1rem;
+}
+
 @media (max-width: 767px) {
+  /* Proportional root font scaling for phone screens (375px–430px) */
+  html {
+    font-size: 15px;
+  }
+
   /* Prevent horizontal page overflow on narrow phones */
   html,
   body {
@@ -388,21 +391,27 @@ tbody tr:hover {
     overflow-x: hidden;
   }
 
+  /* Keep floating Road Radio cleanly above bottom nav + iPhone Home Indicator */
+  .nd-radio-floating {
+    bottom: calc(4.15rem + env(safe-area-inset-bottom, 0px));
+  }
+
   /* Proportionally tighten outer module containers (.p-6, .p-8) on phones */
   main .nd-page-transition > div.p-6,
-  main .nd-page-transition > div.p-8 {
-    padding: 0.85rem !important;
+  main .nd-page-transition > div.p-8,
+  main .nd-page-transition > div.p-3\.5 {
+    padding: 0.75rem !important;
   }
 
   /* Proportionally tighten large card paddings on phones */
   .nd-card.p-6,
   .nd-card.p-7,
   .nd-card.p-8 {
-    padding: 1rem !important;
+    padding: 0.95rem !important;
   }
 
   .nd-card.p-5 {
-    padding: 0.875rem !important;
+    padding: 0.85rem !important;
   }
 
   /* Ensure all modals fit within any phone screen */
@@ -410,10 +419,12 @@ tbody tr:hover {
     max-width: calc(100vw - 1.25rem);
   }
 
-  /* Smooth momentum scrolling for data tables on touchscreens */
+  /* Smooth momentum scrolling for data tables and main viewport on touchscreens */
+  main,
   .overflow-x-auto,
   .overflow-y-auto {
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
   }
 
   /* Compact table cell padding on mobile screens */
@@ -431,8 +442,9 @@ tbody tr:hover {
   }
 
   /* Dynamic viewport height for iOS Safari & Android Chrome */
-  .nd-page.h-screen {
+  .nd-page {
     height: 100dvh;
+    width: 100%;
   }
 }
 

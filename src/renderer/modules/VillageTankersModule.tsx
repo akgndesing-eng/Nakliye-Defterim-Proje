@@ -433,7 +433,7 @@ export const VillageTankersModule: React.FC = () => {
 
           {/* Açılır Ay ve Eski Kayıtlı Dönem Seçici */}
           {showMonthPicker && (
-            <div className="nd-modal absolute right-0 mt-2 w-80 p-4 z-50 space-y-4">
+            <div className="nd-modal fixed sm:absolute left-3 right-3 sm:left-auto sm:right-0 top-24 sm:top-auto sm:mt-2 w-auto sm:w-80 p-4 z-50 space-y-4">
               <div
                 className="flex items-center justify-between pb-2.5 border-b"
                 style={{ borderColor: 'var(--border)' }}

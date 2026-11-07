@@ -844,11 +844,35 @@ export const mobileStorageApi: ElectronApi = {
       createdAt: new Date().toISOString(),
       vaultEnvelope: envelope
     };
-    const jsonBlob = new Blob([JSON.stringify(exportBundle, null, 2)], { type: 'application/json' });
+    const jsonString = JSON.stringify(exportBundle, null, 2);
+    const fileName = `Nakliye_Defterim_v45_Yedek_${todayISO()}.json`;
+
+    // On iOS / iPhone & modern mobile browsers, use Native Share Sheet ("Dosyalara Kaydet" / AirDrop / WhatsApp)
+    try {
+      const fileObj = new File([jsonString], fileName, { type: 'application/json' });
+      const nav = navigator as any;
+      if (typeof nav.canShare === 'function' && nav.canShare({ files: [fileObj] })) {
+        await nav.share({
+          title: 'Nakliye Defterim Şifreli Yedek',
+          text: `Nakliye Defterim Yedek Dosyası (${todayISO()})`,
+          files: [fileObj]
+        });
+        return {
+          success: true,
+          message: 'Şifreli yedek dosyası iOS Paylaşım / Dosyalar ekranına aktarıldı.'
+        };
+      }
+    } catch (shareErr: any) {
+      if (shareErr?.name === 'AbortError') {
+        return { success: false, message: 'Yedek kaydetme işlemi iptal edildi.' };
+      }
+    }
+
+    const jsonBlob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(jsonBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Nakliye_Defterim_v45_Yedek_${todayISO()}.json`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -860,15 +884,28 @@ export const mobileStorageApi: ElectronApi = {
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.json,.db';
+      input.accept = '.json,.db,application/json';
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      input.style.pointerEvents = 'none';
+      document.body.appendChild(input);
+
+      const cleanup = () => {
+        try {
+          if (input.parentNode) input.parentNode.removeChild(input);
+        } catch {}
+      };
+
       input.onchange = async () => {
         if (!input.files || input.files.length === 0) {
+          cleanup();
           resolve({ success: false, message: 'Dosya seçilmedi.' });
           return;
         }
         try {
           const file = input.files[0];
           const text = await file.text();
+          cleanup();
           const parsed = JSON.parse(text);
           const envelope: VaultEnvelope = parsed.vaultEnvelope || parsed;
           const jsonStr = await decryptData(envelope, password);
@@ -884,6 +921,7 @@ export const mobileStorageApi: ElectronApi = {
           await persistVault();
           resolve({ success: true, message: 'Şifreli yedek başarıyla yüklendi ve açıldı.' });
         } catch (err: any) {
+          cleanup();
           reject(err);
         }
       };
@@ -2208,7 +2246,17 @@ export const mobileStorageApi: ElectronApi = {
 
   openExternal: async (url: string): Promise<boolean> => {
     try {
-      // On Android WebView, whatsapp:// or https://wa.me/ links open best via anchor navigation or _system
+      // On iOS WKWebView & Android WebView, convert https://wa.me/PHONE?text=... to native whatsapp://send
+      const waMatch = url.match(/^https?:\/\/wa\.me\/(\d+)(\?.*)?$/i);
+      if (waMatch) {
+        const phone = waMatch[1];
+        const query = waMatch[2] || '';
+        const textParam = query.startsWith('?') ? `&${query.slice(1)}` : '';
+        const nativeWaUrl = `whatsapp://send?phone=${phone}${textParam}`;
+        window.location.href = nativeWaUrl;
+        return true;
+      }
+
       const a = document.createElement('a');
       a.href = url;
       a.target = '_blank';

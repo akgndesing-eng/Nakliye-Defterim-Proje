@@ -120,9 +120,9 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
   const brentOil = markets?.commodities?.find((c) => c.symbol === 'BZ=F');
 
   return (
-    <div className="p-3.5 sm:p-6 space-y-4 sm:space-y-6">
+    <div className="p-3.5 sm:p-6 space-y-3.5 sm:space-y-6">
       {/* 1. MERKEZİ TANKER HERO VITRİN KARTI (Kullanıcının Gönderdiği Tır Fotoğrafı — Hafif Karartılmış Profesyonel Vitrin) */}
-      <div className="relative rounded-2xl overflow-hidden border shadow-2xl min-h-[290px] sm:min-h-[340px] flex flex-col justify-between p-4 sm:p-7 select-none" style={{ borderColor: 'var(--border)' }}>
+      <div className="relative rounded-2xl overflow-hidden border shadow-2xl min-h-[245px] sm:min-h-[340px] flex flex-col justify-between p-3.5 sm:p-7 select-none" style={{ borderColor: 'var(--border)' }}>
         {/* Background Tanker Photo */}
         <img
           src={fleetHeroTruck}
@@ -147,10 +147,10 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
         />
 
         {/* Top Row inside Hero */}
-        <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
             <span
-              className="px-3 py-1 rounded-full text-xs font-extrabold text-white border"
+              className="px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-extrabold text-white border"
               style={{
                 backgroundColor: 'rgba(31, 82, 62, 0.85)',
                 borderColor: 'rgba(255, 255, 255, 0.22)',
@@ -160,7 +160,7 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
               {todayFormatted}
             </span>
             <span
-              className="px-3 py-1 rounded-full text-xs font-bold text-amber-200 border"
+              className="hidden sm:inline-block px-3 py-1 rounded-full text-xs font-bold text-amber-200 border"
               style={{
                 backgroundColor: 'rgba(20, 23, 22, 0.72)',
                 borderColor: 'rgba(197, 168, 114, 0.4)',
@@ -173,24 +173,24 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
 
           {/* Live Weather & Market Pill in Hero */}
           <div
-            className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-slate-100 flex items-center gap-4 border"
+            className="px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl text-[10px] sm:text-xs font-bold text-slate-100 flex items-center gap-2 sm:gap-4 border"
             style={{
               backgroundColor: 'rgba(15, 25, 40, 0.72)',
               borderColor: 'rgba(255, 255, 255, 0.18)',
               backdropFilter: 'blur(8px)'
             }}
           >
-            <span className="flex items-center gap-1.5">
-              <CloudSun size={15} className="text-sky-400" />
-              <span>Edirne MGM:</span>
+            <span className="flex items-center gap-1">
+              <CloudSun size={13} className="text-sky-400 shrink-0" />
+              <span className="hidden sm:inline">Edirne MGM:</span>
               <b className="tabular-nums text-white">
-                {weather ? `${weather.temperature.toFixed(1)}°C (${weather.conditionText})` : '12.3°C'}
+                {weather ? `${weather.temperature.toFixed(1)}°C` : '12.3°C'}
               </b>
             </span>
             <span className="opacity-30">|</span>
-            <span className="flex items-center gap-1.5">
-              <Coins size={15} className="text-amber-400" />
-              <span>Gram Altın:</span>
+            <span className="flex items-center gap-1">
+              <Coins size={13} className="text-amber-400 shrink-0" />
+              <span className="hidden sm:inline">Gram Altın:</span>
               <b className="tabular-nums text-amber-300">
                 {gramGold ? `${gramGold.selling.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺` : '...'}
               </b>
@@ -199,37 +199,37 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
         </div>
 
         {/* Center / Bottom Hero Headline & Glass KPI Strip */}
-        <div className="relative z-10 mt-10 space-y-5">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div className="relative z-10 mt-3.5 sm:mt-8 space-y-3 sm:space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 sm:gap-4">
             <div className="max-w-2xl">
-              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight drop-shadow-md">
+              <h1 className="text-lg sm:text-2xl md:text-3xl font-black text-white tracking-tight drop-shadow-md leading-snug">
                 Nakliye Defterim — Genel Filo & Operasyon Özeti
               </h1>
-              <p className="text-xs md:text-sm text-slate-200 mt-1.5 font-medium leading-relaxed drop-shadow">
+              <p className="text-[11px] sm:text-xs md:text-sm text-slate-200 mt-1 font-medium leading-relaxed drop-shadow">
                 Hoş geldiniz {managerName} ({companyTitle}). Tüm akaryakıt tankerleriniz, çoklu istasyon sevkiyatlarınız, müşteri cari bakiyeleriniz ve canlı piyasa verileriniz tek merkezde hazır.
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-2.5 shrink-0">
               <button
                 onClick={onQuickNewTrip}
-                className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white flex items-center gap-2 shadow-lg transition-transform active:scale-95"
+                className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-white flex items-center justify-center gap-1.5 shadow-lg transition-transform active:scale-95"
                 style={{ backgroundColor: 'var(--accent)' }}
               >
-                <Plus size={16} />
-                <span>+ Yeni Sefer Başlat</span>
+                <Plus size={15} className="shrink-0" />
+                <span className="truncate">Yeni Sefer Başlat</span>
               </button>
               <button
                 onClick={() => onNavigate('reports')}
-                className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white flex items-center gap-2 border transition-all hover:bg-white/15"
+                className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-white flex items-center justify-center gap-1.5 border transition-all hover:bg-white/15"
                 style={{
                   backgroundColor: 'rgba(255, 255, 255, 0.12)',
                   borderColor: 'rgba(255, 255, 255, 0.28)',
                   backdropFilter: 'blur(8px)'
                 }}
               >
-                <FileSpreadsheet size={15} />
-                <span>Aylık Finansal Raporlar</span>
+                <FileSpreadsheet size={14} className="shrink-0" />
+                <span className="truncate">Aylık Raporlar</span>
               </button>
             </div>
           </div>
@@ -325,7 +325,7 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
       </div>
 
       {/* 2. TÜM SİSTEMİN 360° ÖZET PANELLERİ (3 Sütunlu Master Grid) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-6">
         {/* Sütun 1: Son Seferler & Sevkiyat Durumu (4 Cols) */}
         <div className="lg:col-span-4 nd-card p-5 flex flex-col justify-between">
           <div>

@@ -10,10 +10,11 @@ const config: CapacitorConfig = {
     cleartext: true
   },
   ios: {
-    contentInset: 'automatic',
+    contentInset: 'never',
     allowsLinkPreview: false,
     backgroundColor: '#141716',
-    preferredContentMode: 'mobile'
+    preferredContentMode: 'mobile',
+    scrollEnabled: false
   },
   plugins: {
     CapacitorHttp: {
