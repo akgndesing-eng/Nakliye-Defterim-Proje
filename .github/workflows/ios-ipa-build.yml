@@ -1,0 +1,53 @@
+name: iOS IPA Paketi Olustur (Nakliye Defterim)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-ios-ipa:
+    name: macOS Xcode ile .ipa Derle
+    runs-on: macos-latest
+    steps:
+      - name: Proje Dosyalarini Cek
+        uses: actions/checkout@v4
+
+      - name: Node.js 20 Kurulumu
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Paketleri Yukle ve Uygulamayi Derle
+        run: |
+          npm install
+          npm run build:renderer
+          npx cap sync ios
+
+      - name: Xcode ile iPhone (arm64) Arsivi Derle
+        run: |
+          cd ios/App
+          xcodebuild -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath $RUNNER_TEMP/NakliyeDefterim.xcarchive \
+            archive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: .app Paketini Nakliye-Defterim-iOS.ipa Dosyasina Donustur
+        run: |
+          mkdir -p $RUNNER_TEMP/Payload
+          cp -R $RUNNER_TEMP/NakliyeDefterim.xcarchive/Products/Applications/App.app $RUNNER_TEMP/Payload/
+          cd $RUNNER_TEMP
+          zip -qry $GITHUB_WORKSPACE/Nakliye-Defterim-iOS.ipa Payload
+
+      - name: Nakliye-Defterim-iOS.ipa Dosyasini Indirmeye Hazirla
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nakliye-Defterim-iOS-IPA
+          path: Nakliye-Defterim-iOS.ipa
+          if-no-files-found: error

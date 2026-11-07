@@ -1,0 +1,79 @@
+{
+  "name": "nakliye-defterim",
+  "version": "1.0.0",
+  "description": "Gökmen Petrol Ürünleri Nakliye Defterim Masaüstü Yönetim Sistemi",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev:renderer": "vite",
+    "dev:main": "cross-env NODE_ENV=development electron .",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "test": "vitest run --config vitest.config.ts",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.gokmenpetrol.nakliyedefterim",
+    "productName": "Nakliye Defterim",
+    "npmRebuild": false,
+    "directories": {
+      "output": "build-out"
+    },
+    "files": [
+      "dist/**/*",
+      "build/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nakliye Defterim"
+    }
+  },
+  "keywords": [
+    "nakliye",
+    "akaryakit",
+    "petrol",
+    "yonetim",
+    "masaustu"
+  ],
+  "author": "Gökmen Petrol Ürünleri Nak. İnş. Ltd. Şti.",
+  "license": "Proprietary",
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
+    "better-sqlite3": "^13.0.3",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.67.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwind-merge": "^3.7.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.4",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "autoprefixer": "^10.6.2",
+    "concurrently": "^10.0.6",
+    "cross-env": "^10.1.0",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "postcss": "^8.5.32",
+    "tailwindcss": "^4.3.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
+  }
+}

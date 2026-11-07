@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Nakliye Defterim</string>
+    <string name="title_activity_main">Nakliye Defterim</string>
+    <string name="package_name">com.nakliyedefterim.app</string>
+    <string name="custom_url_scheme">com.nakliyedefterim.app</string>
+</resources>

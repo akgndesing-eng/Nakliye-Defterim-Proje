@@ -1,0 +1,21 @@
+node_modules/
+dist/
+release/
+build-out/
+build-out-*/
+data/
+*.log
+.DS_Store
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+
+# iOS build artifacts
+ios/App/build/
+ios/App/Pods/
+*.xcarchive
+*.ipa

@@ -1,0 +1,25 @@
+<svg width="256" height="256" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ndForestBg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#265E48" />
+      <stop offset="100%" stop-color="#16382B" />
+    </linearGradient>
+    <linearGradient id="ndChampagneAccent" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DEC38F" />
+      <stop offset="50%" stop-color="#C5A872" />
+      <stop offset="100%" stop-color="#9E7E46" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="15" fill="url(#ndForestBg)" stroke="url(#ndChampagneAccent)" stroke-width="2" />
+  <rect x="8" y="8" width="48" height="48" rx="11.5" stroke="#DEC38F" stroke-opacity="0.18" stroke-width="1" />
+  <path d="M13 46.5C23 42.5 41 42.5 51 46.5" stroke="url(#ndChampagneAccent)" stroke-width="2.2" stroke-linecap="round" />
+  <path d="M20 50.5C27 48.2 37 48.2 44 50.5" stroke="#DEC38F" stroke-opacity="0.55" stroke-width="1.5" stroke-linecap="round" />
+  <rect x="12" y="22.5" width="25" height="12" rx="6" fill="#F6F5F0" />
+  <path d="M16.5 28.5H32.5" stroke="url(#ndChampagneAccent)" stroke-width="2.2" stroke-linecap="round" />
+  <path d="M39 24H45.8C47.5 24 49 25.1 49.6 26.7L51.4 31.5C51.8 32.5 52 33.5 52 34.5V36C52 36.8 51.3 37.5 50.5 37.5H39V24Z" fill="#F6F5F0" />
+  <path d="M42 26.2H46.2L48 30.8H42V26.2Z" fill="#1B4333" />
+  <rect x="13.5" y="35.8" width="36.5" height="2" rx="1" fill="url(#ndChampagneAccent)" />
+  <circle cx="19" cy="39.5" r="3.2" fill="#141716" stroke="url(#ndChampagneAccent)" stroke-width="1.6" />
+  <circle cx="27.5" cy="39.5" r="3.2" fill="#141716" stroke="url(#ndChampagneAccent)" stroke-width="1.6" />
+  <circle cx="45.5" cy="39.5" r="3.2" fill="#141716" stroke="url(#ndChampagneAccent)" stroke-width="1.6" />
+</svg>

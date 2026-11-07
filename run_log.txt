@@ -1,0 +1,15 @@
+
+(node:29344) UnhandledPromiseRejectionWarning: Error: ENOTDIR, not a directory
+    at createError (node:internal/electron/js2c/node_init:3:3982)
+    at Object.mkdirSync (node:internal/electron/js2c/node_init:3:26331)
+    at getDatabasePath (C:\Users\LENOVO\.gemini\antigravity\scratch\nakliye-defterim\release\win-unpacked\resources\app.asar\dist\main\db\database.js:21:26)
+    at initDatabase (C:\Users\LENOVO\.gemini\antigravity\scratch\nakliye-defterim\release\win-unpacked\resources\app.asar\dist\main\db\database.js:36:36)
+    at createWindow (C:\Users\LENOVO\.gemini\antigravity\scratch\nakliye-defterim\release\win-unpacked\resources\app.asar\dist\main\main.js:13:33)
+(Use `"Nakliye --trace-warnings ...` to show where the warning was created)
+(node:29344) UnhandledPromiseRejectionWarning: Unhandled promise rejection. This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). To terminate the node process on unhandled promise rejection, use the CLI flag `--unhandled-rejections=strict` (see https://nodejs.org/api/cli.html#cli_unhandled_rejections_mode). (rejection id: 1)
+[29344:1103/133050.449:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: Erişim engellendi. (0x5)
+[29344:1103/133050.452:ERROR:net\disk_cache\disk_cache.cc:293] Unable to create cache
+[29344:1103/133050.452:ERROR:gpu\ipc\host\gpu_disk_cache.cc:737] Gpu Cache Creation failed: -2
+[29344:1103/133050.561:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: Erişim engellendi. (0x5)
+[29344:1103/133050.561:ERROR:net\disk_cache\disk_cache.cc:293] Unable to create cache
+[29344:1103/133050.561:ERROR:gpu\ipc\host\gpu_disk_cache.cc:737] Gpu Cache Creation failed: -2
