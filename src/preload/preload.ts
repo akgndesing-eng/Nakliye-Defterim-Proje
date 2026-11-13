@@ -1,11 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const api = {
-  // Gate & Security
+  // Gate & Security & Multi-User Cloud Sync
   getGateStatus: () => ipcRenderer.invoke('gate:status'),
   setupVault: (password: string) => ipcRenderer.invoke('gate:setup', password),
   unlockVault: (password: string) => ipcRenderer.invoke('gate:unlock', password),
   lockVault: () => ipcRenderer.invoke('gate:lock'),
+  switchUserVault: (payload: { username: string; password: string; migrateCurrent?: boolean }) =>
+    ipcRenderer.invoke('gate:switchUserVault', payload),
+  exportDatabaseSnapshot: () => ipcRenderer.invoke('erp:exportDatabaseSnapshot'),
+  importDatabaseSnapshot: (snapshot: any) => ipcRenderer.invoke('erp:importDatabaseSnapshot', snapshot),
   exportEncryptedBackup: () => ipcRenderer.invoke('gate:exportBackup'),
   importEncryptedBackup: (password: string, filePath?: string) =>
     ipcRenderer.invoke('gate:importBackup', { password, filePath }),
@@ -19,10 +23,16 @@ const api = {
   globalSearch: (query: string) => ipcRenderer.invoke('erp:globalSearch', query),
   getNotifications: () => ipcRenderer.invoke('erp:getNotifications'),
 
-  // Vehicles & Expenses
+  // Vehicles & Expenses & Vehicle Documents (Araç Evrak)
   getVehicles: () => ipcRenderer.invoke('erp:getVehicles'),
   saveVehicle: (data: any) => ipcRenderer.invoke('erp:saveVehicle', data),
   deleteVehicle: (id: string) => ipcRenderer.invoke('erp:deleteVehicle', id),
+  getVehicleDocuments: (vehicleId?: string) => ipcRenderer.invoke('erp:getVehicleDocuments', vehicleId),
+  saveVehicleDocument: (data: any) => ipcRenderer.invoke('erp:saveVehicleDocument', data),
+  deleteVehicleDocument: (id: string) => ipcRenderer.invoke('erp:deleteVehicleDocument', id),
+  getVehicleDocumentFiles: (vehicleId?: string) => ipcRenderer.invoke('erp:getVehicleDocumentFiles', vehicleId),
+  saveVehicleDocumentFile: (data: any) => ipcRenderer.invoke('erp:saveVehicleDocumentFile', data),
+  deleteVehicleDocumentFile: (id: string) => ipcRenderer.invoke('erp:deleteVehicleDocumentFile', id),
   getVehicleExpenses: (filters?: { month?: string; vehicleId?: string }) =>
     ipcRenderer.invoke('erp:getVehicleExpenses', filters || {}),
   saveVehicleExpense: (data: any) => ipcRenderer.invoke('erp:saveVehicleExpense', data),
@@ -75,7 +85,13 @@ const api = {
   deleteVillageTanker: (id: string) => ipcRenderer.invoke('erp:deleteVillageTanker', id),
   getVillageTankerLogs: (tankerId?: string) => ipcRenderer.invoke('erp:getVillageTankerLogs', tankerId),
   saveVillageTankerLog: (data: any) => ipcRenderer.invoke('erp:saveVillageTankerLog', data),
-  deleteVillageTankerLog: (id: string) => ipcRenderer.invoke('erp:deleteVillageTankerLog', id)
+  deleteVillageTankerLog: (id: string) => ipcRenderer.invoke('erp:deleteVillageTankerLog', id),
+
+  // Native Desktop Notifications & File Saving
+  showOsNotification: (title: string, body: string) =>
+    ipcRenderer.invoke('notify:showOsNotification', { title, body }),
+  saveDocumentFile: (fileName: string, dataUrl: string) =>
+    ipcRenderer.invoke('dialog:saveDocumentFile', { fileName, dataUrl })
 };
 
 contextBridge.exposeInMainWorld('api', api);

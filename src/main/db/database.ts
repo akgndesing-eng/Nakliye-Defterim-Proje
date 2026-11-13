@@ -8,6 +8,7 @@ import { AutoBackupItem, AutoBackupStatus } from '../../shared/types';
 
 let dbInstance: Database.Database | null = null;
 let activePassword: string | null = null;
+let activeUsername: string | null = null;
 let idleTimer: NodeJS.Timeout | null = null;
 let autoBackupTimer: NodeJS.Timeout | null = null;
 let autoBackupIntervalMinutes = 10; // Default every 10 minutes
@@ -61,7 +62,22 @@ export function getDatabaseDir(): string {
   return baseDir;
 }
 
-export function getEncryptedVaultPath(): string {
+export function sanitizeUsername(raw?: string | null): string {
+  return (raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._@-]/g, '');
+}
+
+export function getActiveUsername(): string | null {
+  return activeUsername;
+}
+
+export function getEncryptedVaultPath(username?: string | null): string {
+  const targetUser = sanitizeUsername(username !== undefined ? username : activeUsername);
+  if (targetUser) {
+    return path.join(getDatabaseDir(), `nakliye_user_${targetUser}.enc.db`);
+  }
   return path.join(getDatabaseDir(), 'nakliye_defterim_v45.enc.db');
 }
 
@@ -421,12 +437,13 @@ function runMigrations(db: Database.Database): void {
 }
 
 export function setupInitialVault(password: string): void {
-  if (!password || password.length < 10) {
-    throw new Error('Ana parola güvenlik gereği en az 10 karakter olmalıdır.');
+  if (!password || password.length < 4) {
+    throw new Error('Ana parola en az 4 karakter olmalıdır.');
   }
   if (dbInstance) {
     lockVault();
   }
+  activeUsername = null;
   customWorkingPath = null;
   removeWorkingFiles();
 
@@ -441,6 +458,104 @@ export function setupInitialVault(password: string): void {
   dbInstance = db;
   activePassword = password;
   syncEncryptedVault('İlk Kurulum Otomatik Yedeği');
+  startAutoBackupScheduler();
+  touchSessionActivity();
+}
+
+export function openOrCreateUserVault(
+  username: string,
+  password: string,
+  migrateLegacyIfNew = false
+): void {
+  const cleanUser = sanitizeUsername(username);
+  if (!cleanUser) {
+    throw new Error('Geçerli bir kullanıcı adı girmelisiniz.');
+  }
+  if (!password || password.length < 4) {
+    throw new Error('Hesap şifresi en az 4 karakter olmalıdır.');
+  }
+
+  const userVaultPath = getEncryptedVaultPath(cleanUser);
+  const deterministicKey = `nd_user_vault_v45:${cleanUser}`;
+
+  // If user vault already exists on disk, unlock it
+  if (fs.existsSync(userVaultPath)) {
+    const rawContent = fs.readFileSync(userVaultPath, 'utf-8');
+    let envelope: VaultEnvelope;
+    try {
+      envelope = JSON.parse(rawContent) as VaultEnvelope;
+    } catch {
+      throw new Error('Kullanıcı veritabanı kasa formatı okunamadı.');
+    }
+
+    let decryptedSqlite: Buffer;
+    try {
+      decryptedSqlite = decryptBufferWithPassword(envelope, password);
+    } catch {
+      decryptedSqlite = decryptBufferWithPassword(envelope, deterministicKey);
+    }
+
+    if (dbInstance) {
+      try {
+        dbInstance.close();
+      } catch {}
+      dbInstance = null;
+    }
+    removeWorkingFiles();
+
+    const workPath = getWorkingSqlitePath();
+    fs.writeFileSync(workPath, decryptedSqlite);
+
+    const db = new Database(workPath);
+    runMigrations(db);
+    dbInstance = db;
+    activeUsername = cleanUser;
+    activePassword = password;
+    syncEncryptedVault(`Hesap Girişi (${cleanUser})`);
+    startAutoBackupScheduler();
+    touchSessionActivity();
+    return;
+  }
+
+  // User vault does not exist on this PC yet — check if we should migrate existing open/legacy DB
+  let seedSqliteBuffer: Buffer | null = null;
+  if (migrateLegacyIfNew) {
+    const currentWorkPath = getActiveSqlitePath();
+    if (dbInstance && fs.existsSync(currentWorkPath)) {
+      try {
+        dbInstance.pragma('wal_checkpoint(TRUNCATE)');
+        seedSqliteBuffer = fs.readFileSync(currentWorkPath);
+      } catch {}
+    } else {
+      const legacyVaultPath = getEncryptedVaultPath(null);
+      if (fs.existsSync(legacyVaultPath)) {
+        try {
+          const env = JSON.parse(fs.readFileSync(legacyVaultPath, 'utf-8')) as VaultEnvelope;
+          seedSqliteBuffer = decryptBufferWithPassword(env, password);
+        } catch {}
+      }
+    }
+  }
+
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+    } catch {}
+    dbInstance = null;
+  }
+  removeWorkingFiles();
+
+  const workPath = getWorkingSqlitePath();
+  if (seedSqliteBuffer) {
+    fs.writeFileSync(workPath, seedSqliteBuffer);
+  }
+
+  const db = new Database(workPath);
+  runMigrations(db);
+  dbInstance = db;
+  activeUsername = cleanUser;
+  activePassword = password;
+  syncEncryptedVault(`Yeni Kullanıcı Hesabı Oluşturuldu (${cleanUser})`);
   startAutoBackupScheduler();
   touchSessionActivity();
 }
@@ -504,6 +619,7 @@ export function lockVault(): void {
     dbInstance = null;
   }
   activePassword = null;
+  activeUsername = null;
   removeWorkingFiles();
 }
 

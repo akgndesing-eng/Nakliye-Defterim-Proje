@@ -9,6 +9,91 @@ export interface GateStatus {
   isInitialized: boolean;
   isUnlocked: boolean;
   vaultPath: string;
+  activeUsername?: string | null;
+  activeDisplayName?: string | null;
+  activeCompanyTitle?: string | null;
+}
+
+export interface CloudAccountProfile {
+  username: string;
+  displayName: string;
+  companyTitle: string;
+  createdAt?: string;
+}
+
+export interface DatabaseSnapshot {
+  revision?: number;
+  updatedAt?: string;
+  deviceName?: string;
+  account?: CloudAccountProfile;
+  vehicles: Vehicle[];
+  drivers: Driver[];
+  customers: Customer[];
+  trips: Trip[];
+  trip_stops: TripStop[];
+  vehicle_expenses: VehicleExpense[];
+  tasks: TaskItem[];
+  reminder_notes: ReminderNote[];
+  customer_transactions: any[];
+  village_tankers: VillageTanker[];
+  village_tanker_logs: VillageTankerLog[];
+  vehicle_documents?: VehicleDocumentRecord[];
+  vehicle_document_files?: VehicleDocumentFile[];
+}
+
+export interface VehicleDocumentExtraItem {
+  id: string;
+  label: string;
+  date: string; // YYYY-MM-DD
+  remind: boolean;
+}
+
+export interface VehicleDocumentRecord {
+  id: string;
+  vehicle_id: string;
+  vehicle_plate?: string;
+  traffic_insurance_end: string;
+  traffic_insurance_remind: number;
+  kasko_end: string;
+  kasko_remind: number;
+  inspection_end: string;
+  inspection_remind: number;
+  adr_other_label: string;
+  adr_other_end: string;
+  adr_other_remind: number;
+  hazmat_policy_start: string;
+  hazmat_policy_start_remind: number;
+  hazmat_policy_end: string;
+  hazmat_policy_end_remind: number;
+  reminder_days_before: number;
+  extra_info: string;
+  extra_items?: VehicleDocumentExtraItem[];
+  updated_at?: string;
+}
+
+export interface VehicleDocumentFile {
+  id: string;
+  vehicle_id: string;
+  vehicle_plate?: string;
+  title: string;
+  category: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  data_url: string;
+  cloud_key?: string;
+  created_at?: string;
+}
+
+export interface CloudSyncStatus {
+  isLoggedIn: boolean;
+  username: string | null;
+  displayName: string | null;
+  companyTitle: string | null;
+  syncState: 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
+  lastSyncedAt: string | null;
+  revision: number;
+  errorMessage?: string | null;
 }
 
 // 1. Araçlar ve Tankerler
@@ -158,7 +243,12 @@ export interface CustomerDetailProfile {
 // Bildirim Merkezi Öğesi
 export interface AppNotification {
   id: string;
-  category: 'overdue_payment' | 'vehicle_inspection' | 'vehicle_insurance' | 'today_task';
+  category:
+    | 'overdue_payment'
+    | 'vehicle_inspection'
+    | 'vehicle_insurance'
+    | 'vehicle_document_expiry'
+    | 'today_task';
   severity: 'danger' | 'warning' | 'info';
   title: string;
   subtitle: string;
@@ -207,6 +297,7 @@ export type NavTabId =
   | 'trip_cost_calc'
   | 'customers'
   | 'vehicle_tracking'
+  | 'vehicle_docs'
   | 'vehicle_info'
   | 'vehicles'
   | 'village_tankers'

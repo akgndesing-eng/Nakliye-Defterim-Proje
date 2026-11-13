@@ -1,4 +1,6 @@
-import { ipcMain, shell } from 'electron';
+import { ipcMain, shell, Notification, dialog } from 'electron';
+import fs from 'fs';
+import path from 'path';
 import { ErpService } from './services/erpService';
 import { LiveFeedService } from './services/liveFeedService';
 
@@ -6,11 +8,16 @@ export function registerIpcHandlers(): void {
   const erp = new ErpService();
   const liveFeed = new LiveFeedService();
 
-  // 1. Gate & Security
+  // 1. Gate & Security & Cloud User Vaults
   ipcMain.handle('gate:status', async () => erp.getGateStatus());
   ipcMain.handle('gate:setup', async (_, password: string) => erp.setupVault(password));
   ipcMain.handle('gate:unlock', async (_, password: string) => erp.unlock(password));
   ipcMain.handle('gate:lock', async () => erp.lock());
+  ipcMain.handle('gate:switchUserVault', async (_, payload: { username: string; password: string; migrateCurrent?: boolean }) =>
+    erp.switchUserVault(payload)
+  );
+  ipcMain.handle('erp:exportDatabaseSnapshot', async () => erp.exportDatabaseSnapshot());
+  ipcMain.handle('erp:importDatabaseSnapshot', async (_, snapshot) => erp.importDatabaseSnapshot(snapshot));
   ipcMain.handle('gate:exportBackup', async () => erp.exportEncryptedBackup());
   ipcMain.handle('gate:importBackup', async (_, { password, filePath }: { password: string; filePath?: string }) =>
     erp.importEncryptedBackup(password, filePath)
@@ -31,10 +38,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('erp:globalSearch', async (_, query: string) => erp.globalSearch(query));
   ipcMain.handle('erp:getNotifications', async () => erp.getNotifications());
 
-  // 3. Vehicles & Monthly Expenses
+  // 3. Vehicles & Monthly Expenses & Vehicle Documents (Araç Evrak)
   ipcMain.handle('erp:getVehicles', async () => erp.getVehicles());
   ipcMain.handle('erp:saveVehicle', async (_, data) => erp.saveVehicle(data));
   ipcMain.handle('erp:deleteVehicle', async (_, id: string) => erp.deleteVehicle(id));
+  ipcMain.handle('erp:getVehicleDocuments', async (_, vehicleId?: string) => erp.getVehicleDocuments(vehicleId));
+  ipcMain.handle('erp:saveVehicleDocument', async (_, data) => erp.saveVehicleDocument(data));
+  ipcMain.handle('erp:deleteVehicleDocument', async (_, id: string) => erp.deleteVehicleDocument(id));
+  ipcMain.handle('erp:getVehicleDocumentFiles', async (_, vehicleId?: string) => erp.getVehicleDocumentFiles(vehicleId));
+  ipcMain.handle('erp:saveVehicleDocumentFile', async (_, data) => erp.saveVehicleDocumentFile(data));
+  ipcMain.handle('erp:deleteVehicleDocumentFile', async (_, id: string) => erp.deleteVehicleDocumentFile(id));
   ipcMain.handle('erp:getVehicleExpenses', async (_, { month, vehicleId }: { month?: string; vehicleId?: string } = {}) =>
     erp.getVehicleExpenses(month, vehicleId)
   );
@@ -93,4 +106,47 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('erp:getVillageTankerLogs', async (_, tankerId?: string) => erp.getVillageTankerLogs(tankerId));
   ipcMain.handle('erp:saveVillageTankerLog', async (_, data) => erp.saveVillageTankerLog(data));
   ipcMain.handle('erp:deleteVillageTankerLog', async (_, id: string) => erp.deleteVillageTankerLog(id));
+
+  // 11. Native Desktop OS Notification & Document File Save Dialog
+  ipcMain.handle('notify:showOsNotification', async (_, { title, body }: { title: string; body: string }) => {
+    try {
+      if (Notification.isSupported()) {
+        const iconPath = path.join(__dirname, '../../build/icon.ico');
+        const n = new Notification({
+          title: title || 'Nakliye Defterim Hatırlatıcı',
+          body: body || '',
+          icon: fs.existsSync(iconPath) ? iconPath : undefined
+        });
+        n.show();
+        return true;
+      }
+    } catch {}
+    return false;
+  });
+
+  ipcMain.handle(
+    'dialog:saveDocumentFile',
+    async (_, { fileName, dataUrl }: { fileName: string; dataUrl: string }) => {
+      try {
+        const safeName = (fileName || 'arac_evrak.jpg').replace(/[\\/:*?"<>|]/g, '_');
+        const res = await dialog.showSaveDialog({
+          title: 'Araç Evrak Dosyasını Kaydet',
+          defaultPath: safeName
+        });
+        if (res.canceled || !res.filePath) {
+          return { success: false, message: 'Kaydetme işlemi iptal edildi.' };
+        }
+        const commaIdx = (dataUrl || '').indexOf(',');
+        const b64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+        fs.writeFileSync(res.filePath, Buffer.from(b64, 'base64'));
+        return {
+          success: true,
+          filePath: res.filePath,
+          message: `Dosya başarıyla kaydedildi: ${res.filePath}`
+        };
+      } catch (err: any) {
+        return { success: false, message: err?.message || 'Dosya kaydedilemedi.' };
+      }
+    }
+  );
 }

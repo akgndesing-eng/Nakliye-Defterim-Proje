@@ -24,10 +24,21 @@ import {
   KeyRound,
   FolderOpen,
   History,
-  RotateCcw
+  RotateCcw,
+  Cloud,
+  Smartphone,
+  Monitor,
+  LogOut,
+  User
 } from 'lucide-react';
-import { AppPreferences, AutoBackupStatus, AutoBackupItem } from '../../shared/types';
+import { AppPreferences, AutoBackupStatus, AutoBackupItem, CloudSyncStatus } from '../../shared/types';
 import { api, preloadAllErpData } from '../api';
+import {
+  subscribeCloudSyncStatus,
+  getCloudSyncStatus,
+  pushLocalVaultWithFeedback,
+  pullCloudVaultWithFeedback
+} from '../api/cloudSync';
 
 interface SettingsModuleProps {
   vaultPath: string;
@@ -56,15 +67,20 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
 }) => {
   const [importPassword, setImportPassword] = useState('');
   const [showImportPass, setShowImportPass] = useState(false);
-  const [busyAction, setBusyAction] = useState<'export' | 'import' | 'sync' | 'auto_now' | 'restore_auto' | null>(null);
+  const [busyAction, setBusyAction] = useState<'export' | 'import' | 'sync' | 'auto_now' | 'restore_auto' | 'cloud_push' | 'cloud_pull' | 'cloud_both' | null>(null);
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [lastBackupTime, setLastBackupTime] = useState<string>(
     () => localStorage.getItem('nd_last_backup_time') || 'Henüz bu oturumda yedek alınmadı'
   );
   const [autoBackupStatus, setAutoBackupStatus] = useState<AutoBackupStatus | null>(null);
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
 
   // Local form state for company & operation profile
   const [formPrefs, setFormPrefs] = useState<AppPreferences>(preferences);
+
+  useEffect(() => {
+    return subscribeCloudSyncStatus(setCloudStatus);
+  }, []);
 
   const refreshAutoBackups = useCallback(async () => {
     try {
@@ -243,6 +259,59 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
     }
   };
 
+  const handleCloudSyncBoth = async () => {
+    setBanner(null);
+    setBusyAction('cloud_both');
+    try {
+      const pullRes = await pullCloudVaultWithFeedback();
+      if (pullRes.updated) {
+        await preloadAllErpData(selectedMonth);
+        onDataRestored();
+        setBanner({ type: 'success', message: pullRes.message });
+      } else {
+        const pushRes = await pushLocalVaultWithFeedback(true);
+        setBanner({
+          type: pushRes.success ? 'success' : 'error',
+          message: pushRes.message
+        });
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleCloudPushManual = async () => {
+    setBanner(null);
+    setBusyAction('cloud_push');
+    try {
+      const res = await pushLocalVaultWithFeedback(true);
+      setBanner({
+        type: res.success ? 'success' : 'error',
+        message: res.message
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleCloudPullManual = async () => {
+    setBanner(null);
+    setBusyAction('cloud_pull');
+    try {
+      const res = await pullCloudVaultWithFeedback();
+      if (res.updated) {
+        await preloadAllErpData(selectedMonth);
+        onDataRestored();
+      }
+      setBanner({
+        type: res.hadCloudData || res.updated ? 'success' : 'error',
+        message: res.message
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Status Banner */}
@@ -268,6 +337,159 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
           </button>
         </div>
       )}
+
+      {/* 0. BULUT HESABI & ÇOKLU CİHAZ VERİ SENKRONİZASYONU (PC • ANDROID • iOS) */}
+      <div className="nd-card p-6 space-y-5 border-2" style={{ borderColor: cloudStatus.isLoggedIn ? 'var(--green)' : 'var(--border)' }}>
+        <div
+          className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <div className="flex items-center gap-3.5">
+            <div
+              className="w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-md shrink-0"
+              style={{ backgroundColor: cloudStatus.isLoggedIn ? 'var(--green)' : 'var(--accent)' }}
+            >
+              <Cloud size={24} />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-extrabold tracking-tight">
+                  Bulut Hesabı & Çoklu Cihaz Senkronizasyonu (Bilgisayar • Android • iOS)
+                </h3>
+                <span
+                  className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                    cloudStatus.isLoggedIn ? 'nd-badge-green' : 'nd-badge-amber'
+                  }`}
+                >
+                  {cloudStatus.isLoggedIn
+                    ? `Canlı Bağlı • @${cloudStatus.username}`
+                    : 'Yerel Mod (Bulut Girişi Yapılmadı)'}
+                </span>
+              </div>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                {cloudStatus.isLoggedIn
+                  ? 'Bilgisayarda eklediğiniz sefer, müşteri, tahsilat ve araç evrak verileri saniyeler içinde Android ve iOS telefonunuzda güncellenir (veya telefondan girdiğiniz veriler bilgisayara gelir).'
+                  : 'Bilgisayar, Android ve iOS arasında otomatik veri eşitlemesi için giriş ekranından kullanıcı hesabınızla giriş yapın veya yeni hesap oluşturun.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {cloudStatus.isLoggedIn ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleCloudSyncBoth}
+                  disabled={busyAction !== null || cloudStatus.syncState === 'syncing'}
+                  className="nd-btn-primary px-4 py-2.5 text-xs flex items-center gap-2 shadow-sm"
+                  style={{ backgroundColor: 'var(--green)' }}
+                >
+                  <RefreshCw size={15} className={busyAction === 'cloud_both' || cloudStatus.syncState === 'syncing' ? 'animate-spin' : ''} />
+                  <span>Şimdi Eşitle (Bulut)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onLockVault}
+                  className="nd-btn-secondary px-3.5 py-2.5 text-xs flex items-center gap-1.5"
+                >
+                  <LogOut size={14} />
+                  <span>Hesap Değiştir / Çıkış Yap</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={onLockVault}
+                className="nd-btn-primary px-4 py-2.5 text-xs flex items-center gap-2 shadow-sm"
+              >
+                <User size={15} />
+                <span>Bulut Hesabı ile Giriş Yap / Yeni Hesap Aç</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Bulut Hesap Bilgileri ve Manuel Gönder/Çek Kontrolleri */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="nd-layer p-3.5 rounded-xl">
+            <span className="text-[11px] font-bold block" style={{ color: 'var(--text-muted)' }}>
+              Aktif Kullanıcı Hesabı
+            </span>
+            <p className="text-sm font-extrabold mt-1 truncate">
+              {cloudStatus.isLoggedIn ? `@${cloudStatus.username}` : 'Yerel Kasa (Çevrimdışı)'}
+            </p>
+            <span className="text-[10px] block mt-0.5 truncate" style={{ color: 'var(--text-dim)' }}>
+              {cloudStatus.displayName || formPrefs.managerName} • {cloudStatus.companyTitle || formPrefs.companyTitle}
+            </span>
+          </div>
+
+          <div className="nd-layer p-3.5 rounded-xl">
+            <span className="text-[11px] font-bold block" style={{ color: 'var(--text-muted)' }}>
+              Bağlı Platformlar
+            </span>
+            <div className="flex items-center gap-2 mt-1.5 text-xs font-extrabold">
+              <span className="flex items-center gap-1">
+                <Monitor size={14} style={{ color: 'var(--accent)' }} /> PC
+              </span>
+              <span>•</span>
+              <span className="flex items-center gap-1">
+                <Smartphone size={14} style={{ color: 'var(--green)' }} /> Android
+              </span>
+              <span>•</span>
+              <span className="flex items-center gap-1">
+                <Smartphone size={14} style={{ color: 'var(--champagne)' }} /> iOS
+              </span>
+            </div>
+            <span className="text-[10px] block mt-1" style={{ color: 'var(--text-dim)' }}>
+              Her kullanıcı hesabı izole veritabanına sahiptir
+            </span>
+          </div>
+
+          <div className="nd-layer p-3.5 rounded-xl">
+            <span className="text-[11px] font-bold block" style={{ color: 'var(--text-muted)' }}>
+              Son Bulut Eşitleme Zamanı
+            </span>
+            <p className="text-sm font-extrabold tabular-nums mt-1" style={{ color: 'var(--green)' }}>
+              {cloudStatus.lastSyncedAt
+                ? cloudStatus.lastSyncedAt
+                : cloudStatus.isLoggedIn
+                ? 'Canlı Dinleniyor...'
+                : '-'}
+            </p>
+            <span className="text-[10px] block mt-0.5" style={{ color: 'var(--text-dim)' }}>
+              Senkron Revizyonu: #{cloudStatus.revision || 0}
+            </span>
+          </div>
+
+          <div className="nd-layer p-3.5 rounded-xl flex flex-col justify-between gap-2">
+            <span className="text-[11px] font-bold block" style={{ color: 'var(--text-muted)' }}>
+              Manuel Bulut İşlemleri
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={!cloudStatus.isLoggedIn || busyAction !== null}
+                onClick={handleCloudPushManual}
+                className="nd-btn-secondary py-1.5 px-2 text-[11px] font-bold flex items-center justify-center gap-1 disabled:opacity-40"
+                title="Bu cihazdaki tüm verileri buluta yükle"
+              >
+                <Upload size={12} />
+                <span>Buluta Gönder</span>
+              </button>
+              <button
+                type="button"
+                disabled={!cloudStatus.isLoggedIn || busyAction !== null}
+                onClick={handleCloudPullManual}
+                className="nd-btn-secondary py-1.5 px-2 text-[11px] font-bold flex items-center justify-center gap-1 disabled:opacity-40"
+                title="Buluttaki son verileri bu cihaza indir"
+              >
+                <Download size={12} />
+                <span>Buluttan Çek</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* 1. ANA GÜVENLİK & YEDEKLEME MERKEZİ (Yedek Al, Yedek Aç, Defteri Kilitle) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

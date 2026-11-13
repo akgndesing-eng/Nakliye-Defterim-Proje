@@ -25,9 +25,43 @@ allprojects {
 }
 
 subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
+                }
+            }
+        }
+        if (project.extensions.findByName('kotlin') != null) {
+            try {
+                project.kotlin {
+                    jvmToolchain(17)
+                }
+            } catch (Exception ignored) {}
+        }
+        if (project.extensions.findByName('java') != null) {
+            try {
+                project.java {
+                    toolchain {
+                        languageVersion = JavaLanguageVersion.of(17)
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+    }
     tasks.withType(JavaCompile).configureEach {
         sourceCompatibility = JavaVersion.VERSION_17.toString()
         targetCompatibility = JavaVersion.VERSION_17.toString()
+        try {
+            def tc = project.extensions.findByName('javaToolchains')
+            if (tc != null) {
+                javaCompiler.set(tc.compilerFor {
+                    languageVersion = JavaLanguageVersion.of(17)
+                })
+            }
+        } catch (Exception ignored) {}
     }
 }
 

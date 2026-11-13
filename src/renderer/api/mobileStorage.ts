@@ -1,6 +1,7 @@
 // Nakliye Defterim — Mobile & Offline Storage Engine (Pure Client-side AES-256 encrypted storage + Real-Time Live Feeds)
 import {
   GateStatus,
+  DatabaseSnapshot,
   Vehicle,
   Driver,
   Customer,
@@ -23,9 +24,14 @@ import {
   MgmDailyForecastItem,
   HaremGoldItem,
   CommodityQuote,
-  LiveMarketsBundle
+  LiveMarketsBundle,
+  VehicleDocumentRecord,
+  VehicleDocumentFile
 } from '../../shared/types';
 import { ElectronApi } from '../../preload/preload';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 const STORAGE_VAULT_KEY = 'nd_mobile_vault_v45';
 const STORAGE_SESSION_KEY = 'nd_mobile_session_pw_v45';
@@ -94,6 +100,71 @@ interface DatabaseState {
   customer_transactions: any[];
   village_tankers: VillageTanker[];
   village_tanker_logs: VillageTankerLog[];
+  vehicle_documents: VehicleDocumentRecord[];
+  vehicle_document_files: VehicleDocumentFile[];
+}
+
+function openMobileIdb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === 'undefined') {
+        resolve(null);
+        return;
+      }
+      const req = indexedDB.open('nd_mobile_vaults_db', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('vaults')) {
+          db.createObjectStore('vaults');
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function readVaultRaw(key: string): Promise<string | null> {
+  try {
+    const db = await openMobileIdb();
+    if (db) {
+      const val = await new Promise<string | null>((resolve) => {
+        const tx = db.transaction('vaults', 'readonly');
+        const store = tx.objectStore('vaults');
+        const g = store.get(key);
+        g.onsuccess = () => resolve(typeof g.result === 'string' ? g.result : null);
+        g.onerror = () => resolve(null);
+      });
+      if (val) return val;
+    }
+  } catch {}
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+async function writeVaultRaw(key: string, val: string): Promise<void> {
+  try {
+    const db = await openMobileIdb();
+    if (db) {
+      await new Promise<void>((resolve) => {
+        const tx = db.transaction('vaults', 'readwrite');
+        const store = tx.objectStore('vaults');
+        store.put(val, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    }
+  } catch {}
+  try {
+    localStorage.setItem(key, val);
+  } catch {
+    // Ignore localStorage 5MB QuotaExceeded when large photo archives live safely in IndexedDB
+  }
 }
 
 interface VaultEnvelope {
@@ -110,9 +181,25 @@ interface VaultEnvelope {
 
 // Global in-memory state when vault is unlocked
 let activePassword: string | null = null;
+let activeUsername: string | null = null;
 let inMemoryDb: DatabaseState | null = null;
 let autoBackupInterval = 10;
 let lastAutoBackupAt: string | null = null;
+
+function sanitizeMobileUsername(raw?: string | null): string {
+  return (raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._@-]/g, '');
+}
+
+function getVaultKeyForUser(user?: string | null): string {
+  const clean = sanitizeMobileUsername(user !== undefined ? user : activeUsername);
+  if (clean) {
+    return `${STORAGE_VAULT_KEY}_user_${clean}`;
+  }
+  return STORAGE_VAULT_KEY;
+}
 
 // Live caches
 let cachedWeather: LiveMgmWeather | null = null;
@@ -582,7 +669,9 @@ function createSeedDatabase(): DatabaseState {
     reminder_notes: notes,
     customer_transactions: [],
     village_tankers: [vt1, vt2, vt3],
-    village_tanker_logs: vtLogs
+    village_tanker_logs: vtLogs,
+    vehicle_documents: [],
+    vehicle_document_files: []
   };
 }
 
@@ -590,7 +679,8 @@ async function persistVault(): Promise<void> {
   if (!inMemoryDb || !activePassword) return;
   const jsonStr = JSON.stringify(inMemoryDb);
   const envelope = await encryptData(jsonStr, activePassword);
-  localStorage.setItem(STORAGE_VAULT_KEY, JSON.stringify(envelope));
+  const targetKey = getVaultKeyForUser(activeUsername);
+  await writeVaultRaw(targetKey, JSON.stringify(envelope));
   localStorage.setItem(STORAGE_SESSION_KEY, activePassword);
   lastAutoBackupAt = new Date().toISOString();
 }
@@ -647,29 +737,72 @@ function enrichStopWithDetails(s: TripStop): TripStop {
 async function ensureMobileUnlocked(): Promise<void> {
   if (inMemoryDb && activePassword) return;
 
-  const raw = localStorage.getItem(STORAGE_VAULT_KEY);
   const explicitLock = localStorage.getItem(STORAGE_LOCKED_FLAG) === 'true';
+  if (explicitLock) return;
 
-  if (!raw) {
-    // First-time launch on mobile: auto-initialize with default key so user enters app immediately
-    activePassword = DEFAULT_MOBILE_MASTER_KEY;
-    inMemoryDb = createSeedDatabase();
-    localStorage.removeItem(STORAGE_LOCKED_FLAG);
+  // Check if user has an active cloud account session saved
+  let savedCloudUser: string | null = null;
+  let savedCloudPw: string | null = null;
+  try {
+    const rawCloudSession = localStorage.getItem('nd_cloud_active_account_v45');
+    if (rawCloudSession) {
+      const parsed = JSON.parse(rawCloudSession);
+      if (parsed && parsed.username) {
+        savedCloudUser = sanitizeMobileUsername(parsed.username);
+        savedCloudPw = parsed.password || DEFAULT_MOBILE_MASTER_KEY;
+      }
+    }
+  } catch {}
+
+  if (savedCloudUser) {
+    activeUsername = savedCloudUser;
+    const userKey = getVaultKeyForUser(savedCloudUser);
+    const rawUserVault = await readVaultRaw(userKey);
+    const pw = savedCloudPw || localStorage.getItem(STORAGE_SESSION_KEY) || DEFAULT_MOBILE_MASTER_KEY;
+    if (rawUserVault) {
+      try {
+        const envelope: VaultEnvelope = JSON.parse(rawUserVault);
+        const jsonStr = await decryptData(envelope, pw);
+        inMemoryDb = JSON.parse(jsonStr);
+        if (inMemoryDb && !Array.isArray(inMemoryDb.vehicle_documents)) inMemoryDb.vehicle_documents = [];
+        if (inMemoryDb && !Array.isArray(inMemoryDb.vehicle_document_files)) inMemoryDb.vehicle_document_files = [];
+        activePassword = pw;
+        return;
+      } catch {
+        try {
+          const envelope: VaultEnvelope = JSON.parse(rawUserVault);
+          const jsonStr = await decryptData(envelope, DEFAULT_MOBILE_MASTER_KEY);
+          inMemoryDb = JSON.parse(jsonStr);
+          if (inMemoryDb && !Array.isArray(inMemoryDb.vehicle_documents)) inMemoryDb.vehicle_documents = [];
+          if (inMemoryDb && !Array.isArray(inMemoryDb.vehicle_document_files)) inMemoryDb.vehicle_document_files = [];
+          activePassword = pw;
+          return;
+        } catch {}
+      }
+    }
+    // Initialize empty user DB ready to receive cloud pull
+    activePassword = pw;
+    inMemoryDb = {
+      vehicles: [],
+      drivers: [],
+      customers: [],
+      trips: [],
+      trip_stops: [],
+      vehicle_expenses: [],
+      tasks: [],
+      reminder_notes: [],
+      customer_transactions: [],
+      village_tankers: [],
+      village_tanker_logs: [],
+      vehicle_documents: [],
+      vehicle_document_files: []
+    };
     await persistVault();
     return;
   }
 
-  if (!explicitLock) {
-    const savedSessionPw = localStorage.getItem(STORAGE_SESSION_KEY) || DEFAULT_MOBILE_MASTER_KEY;
-    try {
-      const envelope: VaultEnvelope = JSON.parse(raw);
-      const jsonStr = await decryptData(envelope, savedSessionPw);
-      inMemoryDb = JSON.parse(jsonStr);
-      activePassword = savedSessionPw;
-    } catch {
-      // Requires manual password unlock
-    }
-  }
+  // If no cloud account is logged in yet on mobile, require login via GateScreen!
+  return;
 }
 
 // ==========================================================
@@ -779,17 +912,21 @@ async function fetchYahooQuoteMobile(symbol: string, name: string, unit: string)
 export const mobileStorageApi: ElectronApi = {
   getGateStatus: async (): Promise<GateStatus> => {
     await ensureMobileUnlocked();
-    const raw = localStorage.getItem(STORAGE_VAULT_KEY);
+    const targetKey = getVaultKeyForUser(activeUsername);
+    const raw = localStorage.getItem(targetKey) || localStorage.getItem(STORAGE_VAULT_KEY);
     return {
       isInitialized: Boolean(raw),
       isUnlocked: activePassword !== null && inMemoryDb !== null,
-      vaultPath: 'Mobil Güvenli Kasa (AES-256 Şifreli Depolama)'
+      vaultPath: activeUsername
+        ? `Bulut Hesap Kasası (@${activeUsername})`
+        : 'Mobil Güvenli Kasa (AES-256 Şifreli Depolama)',
+      activeUsername
     };
   },
 
   setupVault: async (password: string): Promise<GateStatus> => {
-    if (!password || password.length < 10) {
-      throw new Error('Ana parola güvenlik gereği en az 10 karakter olmalıdır.');
+    if (!password || password.length < 4) {
+      throw new Error('Parola en az 4 karakter olmalıdır.');
     }
     activePassword = password;
     if (!inMemoryDb) {
@@ -801,9 +938,10 @@ export const mobileStorageApi: ElectronApi = {
   },
 
   unlockVault: async (password: string): Promise<GateStatus> => {
-    const raw = localStorage.getItem(STORAGE_VAULT_KEY);
+    const targetKey = getVaultKeyForUser(activeUsername);
+    const raw = (await readVaultRaw(targetKey)) || (await readVaultRaw(STORAGE_VAULT_KEY));
     if (!raw) {
-      throw new Error('Henüz kurulu bir veritabanı bulunamadı. Lütfen ilk kurulumu yapın.');
+      throw new Error('Henüz kurulu bir veritabanı bulunamadı. Lütfen hesabınızla giriş yapın veya yeni hesap oluşturun.');
     }
     const envelope: VaultEnvelope = JSON.parse(raw);
     try {
@@ -824,17 +962,151 @@ export const mobileStorageApi: ElectronApi = {
     }
     localStorage.setItem(STORAGE_LOCKED_FLAG, 'true');
     activePassword = null;
+    activeUsername = null;
     inMemoryDb = null;
     return {
       isInitialized: Boolean(localStorage.getItem(STORAGE_VAULT_KEY)),
       isUnlocked: false,
-      vaultPath: 'Mobil Güvenli Kasa (AES-256 Şifreli Depolama)'
+      vaultPath: 'Mobil Güvenli Kasa (AES-256 Şifreli Depolama)',
+      activeUsername: null
     };
+  },
+
+  switchUserVault: async (payload: {
+    username: string;
+    password: string;
+    migrateCurrent?: boolean;
+  }): Promise<GateStatus> => {
+    const cleanUser = sanitizeMobileUsername(payload.username);
+    if (!cleanUser) {
+      throw new Error('Geçerli bir kullanıcı adı girin.');
+    }
+    const pw = payload.password || DEFAULT_MOBILE_MASTER_KEY;
+    const prevDb = payload.migrateCurrent && inMemoryDb ? JSON.parse(JSON.stringify(inMemoryDb)) : null;
+
+    activeUsername = cleanUser;
+    activePassword = pw;
+    localStorage.removeItem(STORAGE_LOCKED_FLAG);
+    localStorage.setItem(STORAGE_SESSION_KEY, pw);
+
+    const userKey = getVaultKeyForUser(cleanUser);
+    const existingRaw = await readVaultRaw(userKey);
+
+    const makeEmptyDb = (): DatabaseState => ({
+      vehicles: [],
+      drivers: [],
+      customers: [],
+      trips: [],
+      trip_stops: [],
+      vehicle_expenses: [],
+      tasks: [],
+      reminder_notes: [],
+      customer_transactions: [],
+      village_tankers: [],
+      village_tanker_logs: [],
+      vehicle_documents: [],
+      vehicle_document_files: []
+    });
+
+    if (existingRaw) {
+      try {
+        const env: VaultEnvelope = JSON.parse(existingRaw);
+        const jsonStr = await decryptData(env, pw);
+        inMemoryDb = JSON.parse(jsonStr);
+      } catch {
+        try {
+          const env: VaultEnvelope = JSON.parse(existingRaw);
+          const jsonStr = await decryptData(env, DEFAULT_MOBILE_MASTER_KEY);
+          inMemoryDb = JSON.parse(jsonStr);
+        } catch {
+          inMemoryDb = prevDb || makeEmptyDb();
+        }
+      }
+    } else {
+      inMemoryDb = prevDb || makeEmptyDb();
+    }
+
+    if (inMemoryDb && !Array.isArray(inMemoryDb.vehicle_documents)) inMemoryDb.vehicle_documents = [];
+    if (inMemoryDb && !Array.isArray(inMemoryDb.vehicle_document_files)) inMemoryDb.vehicle_document_files = [];
+
+    await persistVault();
+    return mobileStorageApi.getGateStatus();
+  },
+
+  exportDatabaseSnapshot: async (): Promise<DatabaseSnapshot> => {
+    await ensureMobileUnlocked();
+    const db = inMemoryDb || {
+      vehicles: [],
+      drivers: [],
+      customers: [],
+      trips: [],
+      trip_stops: [],
+      vehicle_expenses: [],
+      tasks: [],
+      reminder_notes: [],
+      customer_transactions: [],
+      village_tankers: [],
+      village_tanker_logs: [],
+      vehicle_documents: [],
+      vehicle_document_files: []
+    };
+    return {
+      updatedAt: new Date().toISOString(),
+      vehicles: [...(db.vehicles || [])],
+      drivers: [...(db.drivers || [])],
+      customers: [...(db.customers || [])],
+      trips: [...(db.trips || [])],
+      trip_stops: [...(db.trip_stops || [])],
+      vehicle_expenses: [...(db.vehicle_expenses || [])],
+      tasks: [...(db.tasks || [])],
+      reminder_notes: [...(db.reminder_notes || [])],
+      customer_transactions: [...(db.customer_transactions || [])],
+      village_tankers: [...(db.village_tankers || [])],
+      village_tanker_logs: [...(db.village_tanker_logs || [])],
+      vehicle_documents: [...(db.vehicle_documents || [])],
+      vehicle_document_files: [...(db.vehicle_document_files || [])]
+    };
+  },
+
+  importDatabaseSnapshot: async (snapshot: DatabaseSnapshot): Promise<boolean> => {
+    await ensureMobileUnlocked();
+    if (!activePassword) {
+      activePassword = localStorage.getItem(STORAGE_SESSION_KEY) || DEFAULT_MOBILE_MASTER_KEY;
+    }
+    const existingDataMap = new Map<string, string>();
+    for (const f of inMemoryDb?.vehicle_document_files || []) {
+      if (f.data_url) existingDataMap.set(f.id, f.data_url);
+    }
+    const incomingFiles = Array.isArray(snapshot.vehicle_document_files) ? snapshot.vehicle_document_files : [];
+    const mergedFiles = incomingFiles.map((f) => ({
+      ...f,
+      data_url: f.data_url || existingDataMap.get(f.id) || ''
+    }));
+
+    inMemoryDb = {
+      vehicles: Array.isArray(snapshot.vehicles) ? snapshot.vehicles : [],
+      drivers: Array.isArray(snapshot.drivers) ? snapshot.drivers : [],
+      customers: Array.isArray(snapshot.customers) ? snapshot.customers : [],
+      trips: Array.isArray(snapshot.trips) ? snapshot.trips : [],
+      trip_stops: Array.isArray(snapshot.trip_stops) ? snapshot.trip_stops : [],
+      vehicle_expenses: Array.isArray(snapshot.vehicle_expenses) ? snapshot.vehicle_expenses : [],
+      tasks: Array.isArray(snapshot.tasks) ? snapshot.tasks : [],
+      reminder_notes: Array.isArray(snapshot.reminder_notes) ? snapshot.reminder_notes : [],
+      customer_transactions: Array.isArray(snapshot.customer_transactions) ? snapshot.customer_transactions : [],
+      village_tankers: Array.isArray(snapshot.village_tankers) ? snapshot.village_tankers : [],
+      village_tanker_logs: Array.isArray(snapshot.village_tanker_logs) ? snapshot.village_tanker_logs : [],
+      vehicle_documents: Array.isArray(snapshot.vehicle_documents) ? snapshot.vehicle_documents : [],
+      vehicle_document_files: mergedFiles
+    };
+    recalculateAllCustomerBalances();
+    await persistVault();
+    return true;
   },
 
   exportEncryptedBackup: async (): Promise<{ success: boolean; message: string; filePath?: string }> => {
     await persistVault();
-    const raw = localStorage.getItem(STORAGE_VAULT_KEY);
+    const targetKey = getVaultKeyForUser(activeUsername);
+    const raw = (await readVaultRaw(targetKey)) || (await readVaultRaw(STORAGE_VAULT_KEY));
     if (!raw) {
       return { success: false, message: 'Dışa aktarılacak şifreli kasa bulunamadı.' };
     }
@@ -974,8 +1246,8 @@ export const mobileStorageApi: ElectronApi = {
     const today = todayISO();
     const month = selectedMonth || currentMonthISO();
 
-    const allTrips = await mobileStorageApi.getTrips();
-    const todayTrips = allTrips.filter((t) => t.trip_date === today);
+    const allTrips: Trip[] = await mobileStorageApi.getTrips();
+    const todayTrips = allTrips.filter((t: Trip) => t.trip_date === today);
 
     const pendingReceivablesTotal = inMemoryDb.customers.reduce(
       (sum, c) => sum + Number(c.current_balance || 0),
@@ -1013,8 +1285,8 @@ export const mobileStorageApi: ElectronApi = {
       });
     }
 
-    const allTasks = await mobileStorageApi.getTasks();
-    const todayTasks = allTasks.filter((t) => t.task_date === today || t.status === 'pending').slice(0, 8);
+    const allTasks: TaskItem[] = await mobileStorageApi.getTasks();
+    const todayTasks = allTasks.filter((t: TaskItem) => t.task_date === today || t.status === 'pending').slice(0, 8);
     const notifications = await mobileStorageApi.getNotifications();
 
     return {
@@ -1133,36 +1405,62 @@ export const mobileStorageApi: ElectronApi = {
       }
     }
 
+    const docByVehId = new Map<string, VehicleDocumentRecord>();
+    for (const d of inMemoryDb.vehicle_documents || []) {
+      docByVehId.set(d.vehicle_id, d);
+    }
+
+    const addDocAlertIfDue = (
+      veh: Vehicle,
+      key: string,
+      label: string,
+      dateStr: string | undefined,
+      remindEnabled: number | boolean,
+      thresholdDays: number,
+      targetTab: 'vehicle_docs' | 'vehicles',
+      category: 'vehicle_document_expiry' | 'vehicle_inspection' | 'vehicle_insurance'
+    ) => {
+      if (!dateStr || !remindEnabled) return;
+      const diffDays = Math.ceil((new Date(dateStr).getTime() - nowTime) / (1000 * 3600 * 24));
+      if (!Number.isFinite(diffDays) || diffDays > thresholdDays) return;
+      items.push({
+        id: `notif-vdoc-${veh.id}-${key}`,
+        category,
+        severity: diffDays <= 7 ? 'danger' : 'warning',
+        title: `${veh.plate} — ${label}`,
+        subtitle:
+          diffDays < 0
+            ? `${Math.abs(diffDays)} gün geçti! (${veh.driver_name || 'Şoför'})`
+            : diffDays === 0
+            ? `Bugün son gün! (${veh.driver_name || 'Şoför'})`
+            : `${diffDays} gün kaldı (${veh.driver_name || 'Şoför'})`,
+        dateStr,
+        targetTab,
+        entityId: veh.id
+      });
+    };
+
     for (const v of inMemoryDb.vehicles) {
-      if (v.inspection_date) {
-        const diffDays = Math.ceil((new Date(v.inspection_date).getTime() - nowTime) / (1000 * 3600 * 24));
-        if (diffDays <= 30) {
-          items.push({
-            id: `notif-insp-${v.id}`,
-            category: 'vehicle_inspection',
-            severity: diffDays <= 7 ? 'danger' : 'warning',
-            title: `${v.plate} — Muayene / Vize Tarihi`,
-            subtitle: diffDays < 0 ? `${Math.abs(diffDays)} gün geçti!` : `${diffDays} gün kaldı (${v.driver_name || 'Şoför'})`,
-            dateStr: v.inspection_date,
-            targetTab: 'vehicles',
-            entityId: v.id
-          });
+      const doc = docByVehId.get(v.id);
+      const threshold = Number(doc?.reminder_days_before || 30);
+
+      if (doc) {
+        addDocAlertIfDue(v, 'trafik', 'Trafik Sigortası Bitiş Tarihi', doc.traffic_insurance_end, doc.traffic_insurance_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'kasko', 'Kasko Bitiş Tarihi', doc.kasko_end, doc.kasko_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'muayene', 'Muayene Bitiş Tarihi', doc.inspection_end, doc.inspection_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'adr', doc.adr_other_label || 'ADR - Diğer Belge Bitiş Tarihi', doc.adr_other_end, doc.adr_other_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'hazmat-start', 'Tehlikeli Madde - Atık Poliçe Başlangıç Tarihi', doc.hazmat_policy_start, doc.hazmat_policy_start_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'hazmat-end', 'Tehlikeli Madde - Atık Poliçe Bitiş Tarihi', doc.hazmat_policy_end, doc.hazmat_policy_end_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        for (const extra of doc.extra_items || []) {
+          addDocAlertIfDue(v, `extra-${extra.id}`, extra.label || 'Ek Araç Belgesi', extra.date, extra.remind ? 1 : 0, threshold, 'vehicle_docs', 'vehicle_document_expiry');
         }
       }
-      if (v.insurance_date) {
-        const diffDays = Math.ceil((new Date(v.insurance_date).getTime() - nowTime) / (1000 * 3600 * 24));
-        if (diffDays <= 30) {
-          items.push({
-            id: `notif-ins-${v.id}`,
-            category: 'vehicle_insurance',
-            severity: diffDays <= 7 ? 'danger' : 'warning',
-            title: `${v.plate} — Sigorta / Kasko Yenileme`,
-            subtitle: diffDays < 0 ? `${Math.abs(diffDays)} gün geçti!` : `${diffDays} gün kaldı (${v.driver_name || 'Şoför'})`,
-            dateStr: v.insurance_date,
-            targetTab: 'vehicles',
-            entityId: v.id
-          });
-        }
+
+      if (v.inspection_date && (!doc || !doc.inspection_end)) {
+        addDocAlertIfDue(v, 'insp-base', 'Muayene / Vize Tarihi', v.inspection_date, 1, 30, 'vehicle_docs', 'vehicle_inspection');
+      }
+      if (v.insurance_date && (!doc || !doc.traffic_insurance_end)) {
+        addDocAlertIfDue(v, 'ins-base', 'Sigorta / Kasko Yenileme', v.insurance_date, 1, 30, 'vehicle_docs', 'vehicle_insurance');
       }
     }
 
@@ -1216,6 +1514,127 @@ export const mobileStorageApi: ElectronApi = {
     await ensureMobileUnlocked();
     if (!inMemoryDb) return false;
     inMemoryDb.vehicles = inMemoryDb.vehicles.filter((v) => v.id !== id);
+    inMemoryDb.vehicle_documents = (inMemoryDb.vehicle_documents || []).filter((d) => d.vehicle_id !== id);
+    inMemoryDb.vehicle_document_files = (inMemoryDb.vehicle_document_files || []).filter((f) => f.vehicle_id !== id);
+    await persistVault();
+    return true;
+  },
+
+  getVehicleDocuments: async (vehicleId?: string): Promise<VehicleDocumentRecord[]> => {
+    await ensureMobileUnlocked();
+    if (!inMemoryDb) return [];
+    const list = Array.isArray(inMemoryDb.vehicle_documents) ? inMemoryDb.vehicle_documents : [];
+    return list
+      .filter((d) => !vehicleId || d.vehicle_id === vehicleId)
+      .map((d) => ({
+        ...d,
+        vehicle_plate: inMemoryDb?.vehicles.find((v) => v.id === d.vehicle_id)?.plate || d.vehicle_plate || ''
+      }));
+  },
+
+  saveVehicleDocument: async (data: Partial<VehicleDocumentRecord>): Promise<VehicleDocumentRecord> => {
+    await ensureMobileUnlocked();
+    if (!inMemoryDb) throw new Error('LOCKED');
+    if (!Array.isArray(inMemoryDb.vehicle_documents)) inMemoryDb.vehicle_documents = [];
+    if (!data.vehicle_id) throw new Error('Araç seçmelisiniz.');
+
+    const existingIdx = inMemoryDb.vehicle_documents.findIndex((d) => d.vehicle_id === data.vehicle_id);
+    const veh = inMemoryDb.vehicles.find((v) => v.id === data.vehicle_id);
+    const record: VehicleDocumentRecord = {
+      id: (existingIdx >= 0 ? inMemoryDb.vehicle_documents[existingIdx].id : data.id) || `vdoc-${data.vehicle_id}`,
+      vehicle_id: data.vehicle_id,
+      vehicle_plate: veh?.plate || data.vehicle_plate || '',
+      traffic_insurance_end: data.traffic_insurance_end || '',
+      traffic_insurance_remind: Number(data.traffic_insurance_remind ?? 1),
+      kasko_end: data.kasko_end || '',
+      kasko_remind: Number(data.kasko_remind ?? 1),
+      inspection_end: data.inspection_end || '',
+      inspection_remind: Number(data.inspection_remind ?? 1),
+      adr_other_label: (data.adr_other_label || 'ADR - Diğer Belge').trim(),
+      adr_other_end: data.adr_other_end || '',
+      adr_other_remind: Number(data.adr_other_remind ?? 1),
+      hazmat_policy_start: data.hazmat_policy_start || '',
+      hazmat_policy_start_remind: Number(data.hazmat_policy_start_remind ?? 0),
+      hazmat_policy_end: data.hazmat_policy_end || '',
+      hazmat_policy_end_remind: Number(data.hazmat_policy_end_remind ?? 1),
+      reminder_days_before: Number(data.reminder_days_before ?? 30),
+      extra_info: data.extra_info || '',
+      extra_items: Array.isArray(data.extra_items) ? data.extra_items : [],
+      updated_at: new Date().toISOString()
+    };
+
+    if (existingIdx >= 0) {
+      inMemoryDb.vehicle_documents[existingIdx] = record;
+    } else {
+      inMemoryDb.vehicle_documents.push(record);
+    }
+
+    if (veh) {
+      if (record.inspection_end) veh.inspection_date = record.inspection_end;
+      if (record.traffic_insurance_end) veh.insurance_date = record.traffic_insurance_end;
+    }
+
+    await persistVault();
+    return record;
+  },
+
+  deleteVehicleDocument: async (id: string): Promise<boolean> => {
+    await ensureMobileUnlocked();
+    if (!inMemoryDb) return false;
+    inMemoryDb.vehicle_documents = (inMemoryDb.vehicle_documents || []).filter((d) => d.id !== id);
+    await persistVault();
+    return true;
+  },
+
+  getVehicleDocumentFiles: async (vehicleId?: string): Promise<VehicleDocumentFile[]> => {
+    await ensureMobileUnlocked();
+    if (!inMemoryDb) return [];
+    const list = Array.isArray(inMemoryDb.vehicle_document_files) ? inMemoryDb.vehicle_document_files : [];
+    return list
+      .filter((f) => !vehicleId || f.vehicle_id === vehicleId)
+      .map((f) => ({
+        ...f,
+        vehicle_plate: inMemoryDb?.vehicles.find((v) => v.id === f.vehicle_id)?.plate || f.vehicle_plate || ''
+      }))
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  },
+
+  saveVehicleDocumentFile: async (data: Partial<VehicleDocumentFile>): Promise<VehicleDocumentFile> => {
+    await ensureMobileUnlocked();
+    if (!inMemoryDb) throw new Error('LOCKED');
+    if (!Array.isArray(inMemoryDb.vehicle_document_files)) inMemoryDb.vehicle_document_files = [];
+    if (!data.vehicle_id) throw new Error('Önce araç seçmelisiniz.');
+
+    const veh = inMemoryDb.vehicles.find((v) => v.id === data.vehicle_id);
+    const id = data.id || genId('vfile');
+    const existingIdx = inMemoryDb.vehicle_document_files.findIndex((f) => f.id === id);
+    const item: VehicleDocumentFile = {
+      id,
+      vehicle_id: data.vehicle_id,
+      vehicle_plate: veh?.plate || data.vehicle_plate || '',
+      title: (data.title || 'Araç Evrakı').trim(),
+      category: data.category || 'ruhsat',
+      file_name: data.file_name || 'evrak.jpg',
+      mime_type: data.mime_type || 'image/jpeg',
+      file_size: Number(data.file_size || 0),
+      data_url: data.data_url || '',
+      cloud_key: data.cloud_key,
+      created_at: data.created_at || new Date().toISOString()
+    };
+
+    if (existingIdx >= 0) {
+      inMemoryDb.vehicle_document_files[existingIdx] = item;
+    } else {
+      inMemoryDb.vehicle_document_files.unshift(item);
+    }
+    await persistVault();
+    return item;
+  },
+
+  deleteVehicleDocumentFile: async (id: string): Promise<boolean> => {
+    await ensureMobileUnlocked();
+    if (!inMemoryDb) return false;
+    inMemoryDb.vehicle_document_files = (inMemoryDb.vehicle_document_files || []).filter((f) => f.id !== id);
     await persistVault();
     return true;
   },
@@ -1525,8 +1944,8 @@ export const mobileStorageApi: ElectronApi = {
 
     recalculateAllCustomerBalances();
     await persistVault();
-    const all = await mobileStorageApi.getTrips();
-    return all.find((t) => t.id === id) || trip;
+    const all: Trip[] = await mobileStorageApi.getTrips();
+    return all.find((t: Trip) => t.id === id) || trip;
   },
   updateTripStatus: async (tripId: string, status: string, invoiceStatus?: number): Promise<Trip> => {
     await ensureMobileUnlocked();
@@ -1537,8 +1956,8 @@ export const mobileStorageApi: ElectronApi = {
       if (invoiceStatus !== undefined) trip.invoice_status = invoiceStatus;
       await persistVault();
     }
-    const all = await mobileStorageApi.getTrips();
-    return all.find((t) => t.id === tripId) || trip!;
+    const all: Trip[] = await mobileStorageApi.getTrips();
+    return all.find((t: Trip) => t.id === tripId) || trip!;
   },
   deleteTrip: async (tripId: string): Promise<boolean> => {
     await ensureMobileUnlocked();
@@ -2268,5 +2687,98 @@ export const mobileStorageApi: ElectronApi = {
       window.open(url, '_blank');
     }
     return true;
+  },
+
+  showOsNotification: async (title: string, body: string): Promise<boolean> => {
+    try {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, { body });
+        return true;
+      }
+    } catch {}
+    return false;
+  },
+
+  saveDocumentFile: async (
+    fileName: string,
+    dataUrl: string
+  ): Promise<{ success: boolean; filePath?: string; message: string }> => {
+    const safeName = (fileName || 'arac_evrak.jpg').replace(/[\\/:*?"<>|]/g, '_');
+    try {
+      const commaIdx = (dataUrl || '').indexOf(',');
+      const b64Data = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+      const mimeMatch = (dataUrl || '').match(/^data:([^;]+);base64,/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+
+      // 1. Native Android / iOS Capacitor: write to Cache & open Share Sheet ("Fotoğraflara Kaydet / Dosyalara Kaydet") AND save to Documents
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await Filesystem.writeFile({
+            path: `NakliyeDefterim/${safeName}`,
+            data: b64Data,
+            directory: Directory.Documents,
+            recursive: true
+          });
+        } catch {}
+
+        try {
+          const cached = await Filesystem.writeFile({
+            path: safeName,
+            data: b64Data,
+            directory: Directory.Cache,
+            recursive: true
+          });
+          await Share.share({
+            title: safeName,
+            text: `Nakliye Defterim Araç Evrak: ${safeName}`,
+            url: cached.uri,
+            dialogTitle: 'Evrak Fotoğrafını Kaydet veya Paylaş'
+          });
+          return {
+            success: true,
+            filePath: cached.uri,
+            message: `${safeName} telefonunuza indirildi / paylaşım menüsü açıldı.`
+          };
+        } catch (shareErr: any) {
+          if (String(shareErr?.message || '').toLowerCase().includes('cancel')) {
+            return {
+              success: true,
+              message: `${safeName} cihazın Belgeler / NakliyeDefterim klasörüne kaydedildi.`
+            };
+          }
+        }
+      }
+
+      // 2. Web / iOS Safari fallback: convert to Blob and trigger share or download
+      const binStr = atob(b64Data);
+      const bytes = new Uint8Array(binStr.length);
+      for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+      const blob = new Blob([bytes], { type: mimeType });
+
+      try {
+        const fileObj = new File([blob], safeName, { type: mimeType });
+        const nav = navigator as any;
+        if (typeof nav.canShare === 'function' && nav.canShare({ files: [fileObj] })) {
+          await nav.share({ title: safeName, files: [fileObj] });
+          return { success: true, message: `${safeName} paylaşım / kaydetme ekranına aktarıldı.` };
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') {
+          return { success: false, message: 'İndirme işlemi iptal edildi.' };
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = safeName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return { success: true, message: `${safeName} cihazınızın İndirilenler klasörüne kaydedildi.` };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Dosya indirilemedi.' };
+    }
   }
 };

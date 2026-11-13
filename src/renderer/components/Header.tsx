@@ -17,11 +17,18 @@ import {
   Gauge,
   Eye,
   Settings,
-  User
+  User,
+  Cloud
 } from 'lucide-react';
-import { NavTabId, LiveMgmWeather } from '../../shared/types';
+import { NavTabId, LiveMgmWeather, CloudSyncStatus } from '../../shared/types';
 import { BrandLogo } from './BrandLogo';
 import { api, getCached } from '../api';
+import {
+  subscribeCloudSyncStatus,
+  getCloudSyncStatus,
+  pullCloudVaultToLocal,
+  pushLocalVaultToCloud
+} from '../api/cloudSync';
 
 interface HeaderProps {
   activeTab: NavTabId;
@@ -66,6 +73,10 @@ const TAB_TITLES: Record<NavTabId, { title: string; subtitle: string }> = {
   vehicle_info: {
     title: 'Araç Bilgileri & Evrak Takip Sicili',
     subtitle: 'Plaka, kapasite, TÜVTÜRK muayene/vize, kasko/sigorta geri sayımları ve ADR teknik sicil kartları'
+  },
+  vehicle_docs: {
+    title: 'Araç Evrak — Sigorta, Kasko, Muayene, ADR & Belge Kasası',
+    subtitle: 'Plaka bazlı evrak tarihleri, 1 ay kala otomatik çoklu cihaz bildirimleri ve sınırsız fotoğraf/evrak arşivi'
   },
   vehicles: {
     title: 'Araçlar & Aylık Ek Giderler',
@@ -139,12 +150,28 @@ export const Header: React.FC<HeaderProps> = ({
   const [weather, setWeather] = useState<LiveMgmWeather | null>(() => getCached<LiveMgmWeather>('live:weather'));
   const [loadingWeather, setLoadingWeather] = useState(false);
   const [mgmKey, setMgmKey] = useState(Date.now());
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
   const info = TAB_TITLES[activeTab] || TAB_TITLES.dashboard;
   const todayShort = new Date().toLocaleDateString('tr-TR', {
     day: 'numeric',
     month: 'short',
     year: 'numeric'
   });
+
+  useEffect(() => {
+    return subscribeCloudSyncStatus(setCloudStatus);
+  }, []);
+
+  const handleQuickCloudSync = async () => {
+    if (!cloudStatus.isLoggedIn) {
+      onOpenSettings();
+      return;
+    }
+    const pulled = await pullCloudVaultToLocal(false);
+    if (!pulled.updated) {
+      await pushLocalVaultToCloud(true);
+    }
+  };
 
   const refreshWeather = useCallback(async () => {
     setLoadingWeather(true);
@@ -453,6 +480,36 @@ export const Header: React.FC<HeaderProps> = ({
           {darkMode ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} style={{ color: 'var(--accent)' }} />}
         </button>
 
+        {/* 5.5. Live Cloud Account & Multi-Device Sync Button */}
+        <button
+          onClick={handleQuickCloudSync}
+          disabled={cloudStatus.syncState === 'syncing'}
+          className={`p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+            cloudStatus.isLoggedIn ? 'nd-badge-green' : 'nd-layer nd-hover-accent'
+          }`}
+          title={
+            cloudStatus.isLoggedIn
+              ? `Bulut Hesabı: @${cloudStatus.username} • Son Eşitleme: ${
+                  cloudStatus.lastSyncedAt || 'Aktif'
+                } (Şimdi Eşitlemek İçin Tıklayın)`
+              : 'Bulut Senkronizasyonu (Hesap ile Giriş Yapın veya Ayarları Açın)'
+          }
+        >
+          <RefreshCw
+            size={13}
+            className={cloudStatus.syncState === 'syncing' ? 'animate-spin' : ''}
+            style={{ color: cloudStatus.isLoggedIn ? 'var(--green)' : 'var(--accent)' }}
+          />
+          <Cloud size={14} className="hidden sm:inline" />
+          <span className="hidden xl:inline">
+            {cloudStatus.syncState === 'syncing'
+              ? 'Eşitleniyor...'
+              : cloudStatus.isLoggedIn
+              ? `@${cloudStatus.username}`
+              : 'Bulut'}
+          </span>
+        </button>
+
         {/* 6. Profile & Settings Menu Button */}
         <button
           onClick={onOpenSettings}
@@ -462,7 +519,7 @@ export const Header: React.FC<HeaderProps> = ({
           title="Kullanıcı Profili, Ayarlar, Yedek Al, Yedek Aç ve Defteri Kilitle"
         >
           <User size={14} className="hidden sm:inline" style={{ color: activeTab === 'settings' ? '#fff' : 'var(--champagne)' }} />
-          <span className="hidden lg:inline">{managerName}</span>
+          <span className="hidden lg:inline">{cloudStatus.displayName || managerName}</span>
           <Settings size={15} style={{ color: activeTab === 'settings' ? '#fff' : 'var(--accent)' }} />
         </button>
 

@@ -50,6 +50,10 @@ function createWindow(): void {
   });
 }
 
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.gokmenpetrol.nakliyedefterim');
+}
+
 app.whenReady().then(createWindow);
 
 // Keep all popups/redirects inside embedded <webview> tags (Mobiliz & Renault Optifleet login flows)

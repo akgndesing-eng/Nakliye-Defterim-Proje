@@ -7,7 +7,9 @@ import {
   isVaultInitialized,
   isVaultUnlocked,
   getEncryptedVaultPath,
+  getActiveUsername,
   setupInitialVault,
+  openOrCreateUserVault,
   unlockVault,
   lockVault,
   encryptBufferWithPassword,
@@ -19,6 +21,7 @@ import {
 } from '../db/database';
 import {
   GateStatus,
+  DatabaseSnapshot,
   AutoBackupStatus,
   Vehicle,
   Driver,
@@ -36,7 +39,10 @@ import {
   GlobalSearchResult,
   MonthlyReportSummary,
   VillageTanker,
-  VillageTankerLog
+  VillageTankerLog,
+  VehicleDocumentRecord,
+  VehicleDocumentFile,
+  VehicleDocumentExtraItem
 } from '../../shared/types';
 
 function genId(prefix: string): string {
@@ -65,7 +71,8 @@ export class ErpService {
     return {
       isInitialized: isVaultInitialized(),
       isUnlocked: isVaultUnlocked(),
-      vaultPath: getEncryptedVaultPath()
+      vaultPath: getEncryptedVaultPath(),
+      activeUsername: getActiveUsername()
     };
   }
 
@@ -82,6 +89,345 @@ export class ErpService {
   lock(): GateStatus {
     lockVault();
     return this.getGateStatus();
+  }
+
+  switchUserVault(payload: {
+    username: string;
+    password: string;
+    migrateCurrent?: boolean;
+  }): GateStatus {
+    let existingSnapshot: DatabaseSnapshot | null = null;
+    if (payload.migrateCurrent && isVaultUnlocked()) {
+      try {
+        existingSnapshot = this.exportDatabaseSnapshot();
+      } catch {}
+    }
+
+    openOrCreateUserVault(payload.username, payload.password, Boolean(payload.migrateCurrent));
+
+    if (existingSnapshot && payload.migrateCurrent) {
+      try {
+        this.importDatabaseSnapshot(existingSnapshot);
+      } catch {}
+    }
+    return this.getGateStatus();
+  }
+
+  exportDatabaseSnapshot(): DatabaseSnapshot {
+    const db = getDb();
+    return {
+      updatedAt: new Date().toISOString(),
+      vehicles: db.prepare('SELECT * FROM vehicles').all() as Vehicle[],
+      drivers: db.prepare('SELECT * FROM drivers').all() as Driver[],
+      customers: db.prepare('SELECT * FROM customers').all() as Customer[],
+      trips: db.prepare('SELECT * FROM trips').all() as Trip[],
+      trip_stops: db.prepare('SELECT * FROM trip_stops').all() as TripStop[],
+      vehicle_expenses: db.prepare('SELECT * FROM vehicle_expenses').all() as VehicleExpense[],
+      tasks: db.prepare('SELECT * FROM tasks').all() as TaskItem[],
+      reminder_notes: db.prepare('SELECT * FROM reminder_notes').all() as ReminderNote[],
+      customer_transactions: db.prepare('SELECT * FROM customer_transactions').all() as any[],
+      village_tankers: db.prepare('SELECT * FROM village_tankers').all() as VillageTanker[],
+      village_tanker_logs: db.prepare('SELECT * FROM village_tanker_logs').all() as VillageTankerLog[],
+      vehicle_documents: this.getVehicleDocuments(),
+      vehicle_document_files: this.getVehicleDocumentFiles()
+    };
+  }
+
+  importDatabaseSnapshot(snapshot: DatabaseSnapshot): boolean {
+    const db = getDb();
+    // Preserve any existing local photo data_urls before bulk overwrite so lightweight cloud sync never loses local cache
+    const cachedFileDataMap = new Map<string, string>();
+    try {
+      const existingFiles = db.prepare('SELECT id, data_url FROM vehicle_document_files').all() as { id: string; data_url: string }[];
+      for (const ef of existingFiles) {
+        if (ef.data_url) cachedFileDataMap.set(ef.id, ef.data_url);
+      }
+    } catch {}
+
+    db.pragma('foreign_keys = OFF');
+    try {
+      const tx = db.transaction(() => {
+        db.prepare('DELETE FROM vehicle_document_files').run();
+        db.prepare('DELETE FROM vehicle_documents').run();
+        db.prepare('DELETE FROM village_tanker_logs').run();
+        db.prepare('DELETE FROM village_tankers').run();
+        db.prepare('DELETE FROM customer_transactions').run();
+        db.prepare('DELETE FROM reminder_notes').run();
+        db.prepare('DELETE FROM tasks').run();
+        db.prepare('DELETE FROM vehicle_expenses').run();
+        db.prepare('DELETE FROM trip_stops').run();
+        db.prepare('DELETE FROM trips').run();
+        db.prepare('DELETE FROM customers').run();
+        db.prepare('DELETE FROM drivers').run();
+        db.prepare('DELETE FROM vehicles').run();
+
+        const insVeh = db.prepare(`
+          INSERT OR REPLACE INTO vehicles (id, plate, driver_name, vehicle_type, fuel_capacity, inspection_date, insurance_date, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const v of snapshot.vehicles || []) {
+          insVeh.run(
+            v.id,
+            v.plate || '',
+            v.driver_name || '',
+            v.vehicle_type || 'tanker',
+            Number(v.fuel_capacity || 0),
+            v.inspection_date || null,
+            v.insurance_date || null,
+            v.notes || ''
+          );
+        }
+
+        const insDrv = db.prepare(`
+          INSERT OR REPLACE INTO drivers (id, name, phone, tc_no, license_type, active_vehicle_id, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const d of snapshot.drivers || []) {
+          insDrv.run(
+            d.id,
+            d.name || '',
+            d.phone || '',
+            d.tc_no || '',
+            d.license_type || '',
+            d.active_vehicle_id || null,
+            d.notes || ''
+          );
+        }
+
+        const insCust = db.prepare(`
+          INSERT OR REPLACE INTO customers (id, name, company_title, phone, city, address, current_balance, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const c of snapshot.customers || []) {
+          insCust.run(
+            c.id,
+            c.name || '',
+            c.company_title || '',
+            c.phone || '',
+            c.city || '',
+            c.address || '',
+            Number(c.current_balance || 0),
+            c.notes || ''
+          );
+        }
+
+        const insTrip = db.prepare(`
+          INSERT OR REPLACE INTO trips (id, trip_no, trip_date, vehicle_id, driver_name, origin, destination, status, total_freight, fuel_cost, road_cost, other_cost, invoice_status, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const t of snapshot.trips || []) {
+          insTrip.run(
+            t.id,
+            t.trip_no || '',
+            t.trip_date || todayISO(),
+            t.vehicle_id || '',
+            t.driver_name || '',
+            t.origin || '',
+            t.destination || '',
+            t.status || 'transit',
+            Number(t.total_freight || 0),
+            Number(t.fuel_cost || 0),
+            Number(t.road_cost || 0),
+            Number(t.other_cost || 0),
+            Number(t.invoice_status ?? 0),
+            t.notes || ''
+          );
+        }
+
+        const insStop = db.prepare(`
+          INSERT OR REPLACE INTO trip_stops (id, trip_id, stop_order, customer_id, delivered_item, quantity, stop_amount, due_date, paid_amount, payment_status, payment_date)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const s of snapshot.trip_stops || []) {
+          insStop.run(
+            s.id,
+            s.trip_id,
+            Number(s.stop_order || 1),
+            s.customer_id,
+            s.delivered_item || '',
+            Number(s.quantity || 0),
+            Number(s.stop_amount || 0),
+            s.due_date || null,
+            Number(s.paid_amount || 0),
+            s.payment_status || 'unpaid',
+            s.payment_date || null
+          );
+        }
+
+        const insExp = db.prepare(`
+          INSERT OR REPLACE INTO vehicle_expenses (id, vehicle_id, expense_date, expense_month, title, amount)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        for (const e of snapshot.vehicle_expenses || []) {
+          const dt = e.expense_date || todayISO();
+          insExp.run(
+            e.id,
+            e.vehicle_id,
+            dt,
+            e.expense_month || dt.slice(0, 7),
+            e.title || '',
+            Number(e.amount || 0)
+          );
+        }
+
+        const insTask = db.prepare(`
+          INSERT OR REPLACE INTO tasks (id, title, description, task_date, task_time, priority, status, customer_id, vehicle_id, driver_name)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const t of snapshot.tasks || []) {
+          insTask.run(
+            t.id,
+            t.title || '',
+            t.description || '',
+            t.task_date || todayISO(),
+            t.task_time || '10:00',
+            t.priority || 'normal',
+            t.status || 'pending',
+            t.customer_id || null,
+            t.vehicle_id || null,
+            t.driver_name || null
+          );
+        }
+
+        const insNote = db.prepare(`
+          INSERT OR REPLACE INTO reminder_notes (id, title, content, customer_id, remind_date, remind_time, is_completed)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const n of snapshot.reminder_notes || []) {
+          insNote.run(
+            n.id,
+            n.title || '',
+            n.content || '',
+            n.customer_id || null,
+            n.remind_date || todayISO(),
+            n.remind_time || '10:00',
+            Number(n.is_completed ? 1 : 0)
+          );
+        }
+
+        const insTx = db.prepare(`
+          INSERT OR REPLACE INTO customer_transactions (id, customer_id, trip_stop_id, tx_date, tx_type, amount, description)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const txItem of snapshot.customer_transactions || []) {
+          insTx.run(
+            txItem.id,
+            txItem.customer_id,
+            txItem.trip_stop_id || null,
+            txItem.tx_date || todayISO(),
+            txItem.tx_type || 'credit',
+            Number(txItem.amount || 0),
+            txItem.description || ''
+          );
+        }
+
+        const insVt = db.prepare(`
+          INSERT OR REPLACE INTO village_tankers (id, name, plate_or_code, village_name, capacity_liters, current_fuel_liters, driver_name, driver_phone, status, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const vt of snapshot.village_tankers || []) {
+          insVt.run(
+            vt.id,
+            vt.name || '',
+            vt.plate_or_code || '',
+            vt.village_name || '',
+            Number(vt.capacity_liters || 5000),
+            Number(vt.current_fuel_liters || 0),
+            vt.driver_name || '',
+            vt.driver_phone || '',
+            vt.status || 'active',
+            vt.notes || ''
+          );
+        }
+
+        const insVtl = db.prepare(`
+          INSERT OR REPLACE INTO village_tanker_logs (id, tanker_id, log_date, operation_type, villager_or_target, fuel_type, liters, amount, cash_amount, card_amount, credit_sale_amount, credit_collected_amount, driver_name, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const vtl of snapshot.village_tanker_logs || []) {
+          insVtl.run(
+            vtl.id,
+            vtl.tanker_id,
+            vtl.log_date || todayISO(),
+            vtl.operation_type || 'dagitim',
+            vtl.villager_or_target || '',
+            vtl.fuel_type || 'Motorin (Tarım)',
+            Number(vtl.liters || 0),
+            Number(vtl.amount || 0),
+            Number(vtl.cash_amount || 0),
+            Number(vtl.card_amount || 0),
+            Number(vtl.credit_sale_amount || 0),
+            Number(vtl.credit_collected_amount || 0),
+            vtl.driver_name || '',
+            vtl.notes || ''
+          );
+        }
+
+        const insVDoc = db.prepare(`
+          INSERT OR REPLACE INTO vehicle_documents (
+            id, vehicle_id, traffic_insurance_end, traffic_insurance_remind,
+            kasko_end, kasko_remind, inspection_end, inspection_remind,
+            adr_other_label, adr_other_end, adr_other_remind,
+            hazmat_policy_start, hazmat_policy_start_remind,
+            hazmat_policy_end, hazmat_policy_end_remind,
+            reminder_days_before, extra_info, extra_docs_json, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const vd of snapshot.vehicle_documents || []) {
+          insVDoc.run(
+            vd.id || `vdoc-${vd.vehicle_id}`,
+            vd.vehicle_id,
+            vd.traffic_insurance_end || '',
+            Number(vd.traffic_insurance_remind ?? 1),
+            vd.kasko_end || '',
+            Number(vd.kasko_remind ?? 1),
+            vd.inspection_end || '',
+            Number(vd.inspection_remind ?? 1),
+            vd.adr_other_label || 'ADR - Diğer Belge',
+            vd.adr_other_end || '',
+            Number(vd.adr_other_remind ?? 1),
+            vd.hazmat_policy_start || '',
+            Number(vd.hazmat_policy_start_remind ?? 0),
+            vd.hazmat_policy_end || '',
+            Number(vd.hazmat_policy_end_remind ?? 1),
+            Number(vd.reminder_days_before ?? 30),
+            vd.extra_info || '',
+            JSON.stringify(Array.isArray(vd.extra_items) ? vd.extra_items : []),
+            vd.updated_at || new Date().toISOString()
+          );
+        }
+
+        const insVFile = db.prepare(`
+          INSERT OR REPLACE INTO vehicle_document_files (
+            id, vehicle_id, title, category, file_name, mime_type, file_size, data_url, cloud_key, created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const vf of snapshot.vehicle_document_files || []) {
+          const dataUrl = vf.data_url || cachedFileDataMap.get(vf.id) || '';
+          insVFile.run(
+            vf.id,
+            vf.vehicle_id,
+            vf.title || 'Araç Evrakı',
+            vf.category || 'diger',
+            vf.file_name || 'evrak.jpg',
+            vf.mime_type || 'image/jpeg',
+            Number(vf.file_size || 0),
+            dataUrl,
+            vf.cloud_key || null,
+            vf.created_at || new Date().toISOString()
+          );
+        }
+      });
+      tx();
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+
+    this.recalculateAllCustomerBalances();
+    syncEncryptedVault('Bulut Senkronizasyon İçe Aktarımı');
+    return true;
   }
 
   // Recalculate a customer's current_balance from unpaid trip_stops + manual transactions
@@ -212,6 +558,184 @@ export class ErpService {
   deleteVehicleExpense(id: string): boolean {
     const db = getDb();
     db.prepare('DELETE FROM vehicle_expenses WHERE id = ?').run(id);
+    syncEncryptedVault();
+    return true;
+  }
+
+  // ==========================================
+  // 2.5. ARAÇ EVRAK TAKİP & BELGE / FOTOĞRAF KASASI
+  // ==========================================
+  getVehicleDocuments(vehicleId?: string): VehicleDocumentRecord[] {
+    const db = getDb();
+    let sql = `
+      SELECT vd.*, v.plate AS vehicle_plate
+      FROM vehicle_documents vd
+      LEFT JOIN vehicles v ON v.id = vd.vehicle_id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (vehicleId) {
+      sql += ' AND vd.vehicle_id = ?';
+      params.push(vehicleId);
+    }
+    sql += ' ORDER BY v.plate ASC';
+    const rows = db.prepare(sql).all(...params) as any[];
+    return rows.map((r) => {
+      let extraItems: VehicleDocumentExtraItem[] = [];
+      try {
+        extraItems = r.extra_docs_json ? JSON.parse(r.extra_docs_json) : [];
+      } catch {
+        extraItems = [];
+      }
+      return {
+        id: r.id,
+        vehicle_id: r.vehicle_id,
+        vehicle_plate: r.vehicle_plate || '',
+        traffic_insurance_end: r.traffic_insurance_end || '',
+        traffic_insurance_remind: Number(r.traffic_insurance_remind ?? 1),
+        kasko_end: r.kasko_end || '',
+        kasko_remind: Number(r.kasko_remind ?? 1),
+        inspection_end: r.inspection_end || '',
+        inspection_remind: Number(r.inspection_remind ?? 1),
+        adr_other_label: r.adr_other_label || 'ADR - Diğer Belge',
+        adr_other_end: r.adr_other_end || '',
+        adr_other_remind: Number(r.adr_other_remind ?? 1),
+        hazmat_policy_start: r.hazmat_policy_start || '',
+        hazmat_policy_start_remind: Number(r.hazmat_policy_start_remind ?? 0),
+        hazmat_policy_end: r.hazmat_policy_end || '',
+        hazmat_policy_end_remind: Number(r.hazmat_policy_end_remind ?? 1),
+        reminder_days_before: Number(r.reminder_days_before ?? 30),
+        extra_info: r.extra_info || '',
+        extra_items: Array.isArray(extraItems) ? extraItems : [],
+        updated_at: r.updated_at || new Date().toISOString()
+      };
+    });
+  }
+
+  saveVehicleDocument(data: Partial<VehicleDocumentRecord>): VehicleDocumentRecord {
+    const db = getDb();
+    if (!data.vehicle_id) {
+      throw new Error('Araç ID belirtilmelidir.');
+    }
+    const existing = db
+      .prepare('SELECT id FROM vehicle_documents WHERE vehicle_id = ?')
+      .get(data.vehicle_id) as { id: string } | undefined;
+    const id = existing?.id || data.id || `vdoc-${data.vehicle_id}`;
+    const nowIso = new Date().toISOString();
+    const extraJson = JSON.stringify(Array.isArray(data.extra_items) ? data.extra_items : []);
+
+    db.prepare(`
+      INSERT OR REPLACE INTO vehicle_documents (
+        id, vehicle_id, traffic_insurance_end, traffic_insurance_remind,
+        kasko_end, kasko_remind, inspection_end, inspection_remind,
+        adr_other_label, adr_other_end, adr_other_remind,
+        hazmat_policy_start, hazmat_policy_start_remind,
+        hazmat_policy_end, hazmat_policy_end_remind,
+        reminder_days_before, extra_info, extra_docs_json, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      data.vehicle_id,
+      data.traffic_insurance_end || '',
+      Number(data.traffic_insurance_remind ?? 1),
+      data.kasko_end || '',
+      Number(data.kasko_remind ?? 1),
+      data.inspection_end || '',
+      Number(data.inspection_remind ?? 1),
+      (data.adr_other_label || 'ADR - Diğer Belge').trim(),
+      data.adr_other_end || '',
+      Number(data.adr_other_remind ?? 1),
+      data.hazmat_policy_start || '',
+      Number(data.hazmat_policy_start_remind ?? 0),
+      data.hazmat_policy_end || '',
+      Number(data.hazmat_policy_end_remind ?? 1),
+      Number(data.reminder_days_before ?? 30),
+      data.extra_info || '',
+      extraJson,
+      nowIso
+    );
+
+    // Sync Muayene & Trafik Sigortası dates back to main vehicles table for fleet-wide consistency
+    if (data.inspection_end || data.traffic_insurance_end) {
+      const veh = db.prepare('SELECT inspection_date, insurance_date FROM vehicles WHERE id = ?').get(data.vehicle_id) as
+        | { inspection_date: string | null; insurance_date: string | null }
+        | undefined;
+      if (veh) {
+        db.prepare('UPDATE vehicles SET inspection_date = ?, insurance_date = ? WHERE id = ?').run(
+          data.inspection_end || veh.inspection_date || null,
+          data.traffic_insurance_end || veh.insurance_date || null,
+          data.vehicle_id
+        );
+      }
+    }
+
+    syncEncryptedVault('Araç Evrak Tarihleri Güncellendi');
+    return this.getVehicleDocuments(data.vehicle_id)[0];
+  }
+
+  deleteVehicleDocument(id: string): boolean {
+    const db = getDb();
+    db.prepare('DELETE FROM vehicle_documents WHERE id = ?').run(id);
+    syncEncryptedVault();
+    return true;
+  }
+
+  getVehicleDocumentFiles(vehicleId?: string): VehicleDocumentFile[] {
+    const db = getDb();
+    let sql = `
+      SELECT vdf.*, v.plate AS vehicle_plate
+      FROM vehicle_document_files vdf
+      LEFT JOIN vehicles v ON v.id = vdf.vehicle_id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (vehicleId) {
+      sql += ' AND vdf.vehicle_id = ?';
+      params.push(vehicleId);
+    }
+    sql += ' ORDER BY vdf.created_at DESC, vdf.id DESC';
+    return db.prepare(sql).all(...params) as VehicleDocumentFile[];
+  }
+
+  saveVehicleDocumentFile(data: Partial<VehicleDocumentFile>): VehicleDocumentFile {
+    const db = getDb();
+    if (!data.vehicle_id) {
+      throw new Error('Belgeyi bağlamak için araç seçin.');
+    }
+    const id = data.id || genId('vfile');
+    const createdAt = data.created_at || new Date().toISOString();
+
+    db.prepare(`
+      INSERT OR REPLACE INTO vehicle_document_files (
+        id, vehicle_id, title, category, file_name, mime_type, file_size, data_url, cloud_key, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      data.vehicle_id,
+      (data.title || 'Araç Evrakı').trim(),
+      data.category || 'diger',
+      data.file_name || 'evrak.jpg',
+      data.mime_type || 'image/jpeg',
+      Number(data.file_size || 0),
+      data.data_url || '',
+      data.cloud_key || null,
+      createdAt
+    );
+
+    syncEncryptedVault('Araç Evrak Fotoğrafı Eklendi');
+    return db.prepare(`
+      SELECT vdf.*, v.plate AS vehicle_plate
+      FROM vehicle_document_files vdf
+      LEFT JOIN vehicles v ON v.id = vdf.vehicle_id
+      WHERE vdf.id = ?
+    `).get(id) as VehicleDocumentFile;
+  }
+
+  deleteVehicleDocumentFile(id: string): boolean {
+    const db = getDb();
+    db.prepare('DELETE FROM vehicle_document_files WHERE id = ?').run(id);
     syncEncryptedVault();
     return true;
   }
@@ -805,40 +1329,66 @@ export class ErpService {
       });
     }
 
-    // 2. Approaching vehicle inspection / insurance (within 30 days)
+    // 2. Approaching vehicle documents & reminders (1 ay / 30 gün kala)
     const vehicles = this.getVehicles();
+    const vehicleDocs = this.getVehicleDocuments();
+    const docByVehId = new Map<string, VehicleDocumentRecord>();
+    for (const d of vehicleDocs) {
+      docByVehId.set(d.vehicle_id, d);
+    }
     const nowTime = new Date(today).getTime();
 
+    const addDocAlertIfDue = (
+      veh: Vehicle,
+      key: string,
+      label: string,
+      dateStr: string | undefined,
+      remindEnabled: number | boolean,
+      thresholdDays: number,
+      targetTab: 'vehicle_docs' | 'vehicles',
+      category: 'vehicle_document_expiry' | 'vehicle_inspection' | 'vehicle_insurance'
+    ) => {
+      if (!dateStr || !remindEnabled) return;
+      const diffDays = Math.ceil((new Date(dateStr).getTime() - nowTime) / (1000 * 3600 * 24));
+      if (!Number.isFinite(diffDays) || diffDays > thresholdDays) return;
+      items.push({
+        id: `notif-vdoc-${veh.id}-${key}`,
+        category,
+        severity: diffDays <= 7 ? 'danger' : 'warning',
+        title: `${veh.plate} — ${label}`,
+        subtitle:
+          diffDays < 0
+            ? `${Math.abs(diffDays)} gün geçti! (${veh.driver_name || 'Şoför'})`
+            : diffDays === 0
+            ? `Bugün son gün! (${veh.driver_name || 'Şoför'})`
+            : `${diffDays} gün kaldı (${veh.driver_name || 'Şoför'})`,
+        dateStr,
+        targetTab,
+        entityId: veh.id
+      });
+    };
+
     for (const v of vehicles) {
-      if (v.inspection_date) {
-        const diffDays = Math.ceil((new Date(v.inspection_date).getTime() - nowTime) / (1000 * 3600 * 24));
-        if (diffDays <= 30) {
-          items.push({
-            id: `notif-insp-${v.id}`,
-            category: 'vehicle_inspection',
-            severity: diffDays <= 7 ? 'danger' : 'warning',
-            title: `${v.plate} — Muayene / Vize Tarihi`,
-            subtitle: diffDays < 0 ? `${Math.abs(diffDays)} gün geçti!` : `${diffDays} gün kaldı (${v.driver_name || 'Şoför'})`,
-            dateStr: v.inspection_date,
-            targetTab: 'vehicles',
-            entityId: v.id
-          });
+      const doc = docByVehId.get(v.id);
+      const threshold = Number(doc?.reminder_days_before || 30);
+
+      if (doc) {
+        addDocAlertIfDue(v, 'trafik', 'Trafik Sigortası Bitiş Tarihi', doc.traffic_insurance_end, doc.traffic_insurance_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'kasko', 'Kasko Bitiş Tarihi', doc.kasko_end, doc.kasko_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'muayene', 'Muayene Bitiş Tarihi', doc.inspection_end, doc.inspection_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'adr', doc.adr_other_label || 'ADR - Diğer Belge Bitiş Tarihi', doc.adr_other_end, doc.adr_other_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'hazmat-start', 'Tehlikeli Madde - Atık Poliçe Başlangıç Tarihi', doc.hazmat_policy_start, doc.hazmat_policy_start_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        addDocAlertIfDue(v, 'hazmat-end', 'Tehlikeli Madde - Atık Poliçe Bitiş Tarihi', doc.hazmat_policy_end, doc.hazmat_policy_end_remind, threshold, 'vehicle_docs', 'vehicle_document_expiry');
+        for (const extra of doc.extra_items || []) {
+          addDocAlertIfDue(v, `extra-${extra.id}`, extra.label || 'Ek Araç Belgesi', extra.date, extra.remind ? 1 : 0, threshold, 'vehicle_docs', 'vehicle_document_expiry');
         }
       }
-      if (v.insurance_date) {
-        const diffDays = Math.ceil((new Date(v.insurance_date).getTime() - nowTime) / (1000 * 3600 * 24));
-        if (diffDays <= 30) {
-          items.push({
-            id: `notif-ins-${v.id}`,
-            category: 'vehicle_insurance',
-            severity: diffDays <= 7 ? 'danger' : 'warning',
-            title: `${v.plate} — Sigorta / Kasko Yenileme`,
-            subtitle: diffDays < 0 ? `${Math.abs(diffDays)} gün geçti!` : `${diffDays} gün kaldı (${v.driver_name || 'Şoför'})`,
-            dateStr: v.insurance_date,
-            targetTab: 'vehicles',
-            entityId: v.id
-          });
-        }
+
+      if (v.inspection_date && (!doc || !doc.inspection_end)) {
+        addDocAlertIfDue(v, 'insp-base', 'Muayene / Vize Tarihi', v.inspection_date, 1, 30, 'vehicle_docs', 'vehicle_inspection');
+      }
+      if (v.insurance_date && (!doc || !doc.traffic_insurance_end)) {
+        addDocAlertIfDue(v, 'ins-base', 'Sigorta / Kasko Yenileme', v.insurance_date, 1, 30, 'vehicle_docs', 'vehicle_insurance');
       }
     }
 
@@ -1102,7 +1652,9 @@ export class ErpService {
       reminder_notes: db.prepare('SELECT * FROM reminder_notes').all(),
       customer_transactions: db.prepare('SELECT * FROM customer_transactions').all(),
       village_tankers: db.prepare('SELECT * FROM village_tankers').all(),
-      village_tanker_logs: db.prepare('SELECT * FROM village_tanker_logs').all()
+      village_tanker_logs: db.prepare('SELECT * FROM village_tanker_logs').all(),
+      vehicle_documents: this.getVehicleDocuments(),
+      vehicle_document_files: this.getVehicleDocumentFiles()
     };
 
     const rawVaultEnvelope = JSON.parse(fs.readFileSync(vaultPath, 'utf-8'));

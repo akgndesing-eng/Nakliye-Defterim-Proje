@@ -23,7 +23,7 @@ function injectAssetsIntoServiceWorker() {
       ...assetFiles
     ];
 
-    const swContent = `const CACHE_NAME = 'nakliye-defterim-ios-v2';
+    const swContent = `const CACHE_NAME = 'nakliye-defterim-ios-v3';
 const CORE_ASSETS = ${JSON.stringify(allAssets, null, 2)};
 
 self.addEventListener('install', (event) => {

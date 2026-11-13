@@ -20,7 +20,10 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
 
   const overdueList = notifications.filter((n) => n.category === 'overdue_payment');
   const vehicleList = notifications.filter(
-    (n) => n.category === 'vehicle_inspection' || n.category === 'vehicle_insurance'
+    (n) =>
+      n.category === 'vehicle_document_expiry' ||
+      n.category === 'vehicle_inspection' ||
+      n.category === 'vehicle_insurance'
   );
   const taskList = notifications.filter((n) => n.category === 'today_task');
 
@@ -109,7 +112,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--amber)' }}>
                   <ShieldAlert size={14} />
-                  <span>Araç Vize / Muayene & Sigorta ({vehicleList.length})</span>
+                  <span>Araç Evrak, Muayene & Sigorta ({vehicleList.length})</span>
                 </span>
               </div>
               {vehicleList.length === 0 ? (

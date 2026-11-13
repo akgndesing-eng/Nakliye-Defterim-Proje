@@ -32,7 +32,9 @@ import { PaymentsModule } from './modules/PaymentsModule';
 import { CustomersModule } from './modules/CustomersModule';
 import { VehicleTrackingModule } from './modules/VehicleTrackingModule';
 import { VehicleInfoModule } from './modules/VehicleInfoModule';
+import { VehicleDocsModule } from './modules/VehicleDocsModule';
 import { VehiclesModule } from './modules/VehiclesModule';
+import { syncVehicleDocumentReminderNotifications } from './api/notifications';
 import { VillageTankersModule } from './modules/VillageTankersModule';
 import { DriversModule } from './modules/DriversModule';
 import { WhatsAppModule } from './modules/WhatsAppModule';
@@ -46,6 +48,7 @@ import { PlanningModule } from './modules/PlanningModule';
 import { SettingsModule } from './modules/SettingsModule';
 import { getCurrentMonth } from './utils/format';
 import { api, preloadAllErpData } from './api';
+import { tryAutoRestoreCloudSession, logoutCloudAccount } from './api/cloudSync';
 
 const DEFAULT_PREFERENCES: AppPreferences = {
   managerName: 'Umut Bey',
@@ -91,8 +94,22 @@ export const App: React.FC = () => {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [newTripSignal, setNewTripSignal] = useState<number>(0);
+  const [cloudRefreshKey, setCloudRefreshKey] = useState<number>(0);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [docReminderBanner, setDocReminderBanner] = useState<AppNotification[]>([]);
   const mainScrollRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const onDocToast = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const alerts: AppNotification[] = Array.isArray(detail?.alerts) ? detail.alerts : [];
+      if (alerts.length > 0) {
+        setDocReminderBanner(alerts);
+      }
+    };
+    window.addEventListener('nd-doc-reminder-toast', onDocToast);
+    return () => window.removeEventListener('nd-doc-reminder-toast', onDocToast);
+  }, []);
 
   useEffect(() => {
     if (mainScrollRef.current) {
@@ -148,17 +165,36 @@ export const App: React.FC = () => {
     localStorage.setItem('nd_preferences_v45', JSON.stringify(nextPrefs));
   };
 
-  // Check initial Gate status
+  // Check initial Gate status & saved Cloud Account session
   useEffect(() => {
-    api
-      .getGateStatus()
-      .then((st) => {
+    (async () => {
+      try {
+        const cloudGate = await tryAutoRestoreCloudSession();
+        if (cloudGate && cloudGate.isUnlocked) {
+          setGateStatus(cloudGate);
+          if (cloudGate.activeDisplayName || cloudGate.activeCompanyTitle) {
+            setPreferences((prev) => {
+              const next = {
+                ...prev,
+                managerName: cloudGate.activeDisplayName || prev.managerName,
+                companyTitle: cloudGate.activeCompanyTitle || prev.companyTitle
+              };
+              localStorage.setItem('nd_preferences_v45', JSON.stringify(next));
+              return next;
+            });
+          }
+          preloadAllErpData(selectedMonth);
+          return;
+        }
+        const st = await api.getGateStatus();
         setGateStatus(st);
         if (st.isUnlocked) {
           preloadAllErpData(selectedMonth);
         }
-      })
-      .finally(() => setCheckingGate(false));
+      } finally {
+        setCheckingGate(false);
+      }
+    })();
   }, []);
 
   // Load notifications & badge counts when unlocked
@@ -180,8 +216,23 @@ export const App: React.FC = () => {
     if (gateStatus.isUnlocked) {
       preloadAllErpData(selectedMonth).then(() => {
         refreshGlobalBadges();
+        syncVehicleDocumentReminderNotifications().catch(() => {});
       });
     }
+  }, [gateStatus.isUnlocked, selectedMonth, refreshGlobalBadges]);
+
+  // Listen for live remote cloud updates from PC / Android / iOS
+  useEffect(() => {
+    if (!gateStatus.isUnlocked) return;
+    const handleCloudUpdated = () => {
+      preloadAllErpData(selectedMonth).then(() => {
+        refreshGlobalBadges();
+        syncVehicleDocumentReminderNotifications().catch(() => {});
+        setCloudRefreshKey((prev) => prev + 1);
+      });
+    };
+    window.addEventListener('nd-cloud-sync-updated', handleCloudUpdated);
+    return () => window.removeEventListener('nd-cloud-sync-updated', handleCloudUpdated);
   }, [gateStatus.isUnlocked, selectedMonth, refreshGlobalBadges]);
 
   // Global keyboard shortcuts: Ctrl+K for CommandDialog, Ctrl+L for Quick Lock, Ctrl+B for Sidebar Collapse
@@ -257,6 +308,7 @@ export const App: React.FC = () => {
   }, [gateStatus.isUnlocked, preferences.autoBackupMinutes]);
 
   const handleLockVault = async () => {
+    await logoutCloudAccount();
     const st = await api.lockVault();
     setGateStatus(st);
     setCommandOpen(false);
@@ -280,7 +332,9 @@ export const App: React.FC = () => {
 
   const handleNavigate = (tab: NavTabId, entityId?: string) => {
     if (tab === 'customers' && entityId) setSelectedCustomerId(entityId);
-    if (tab === 'vehicles' && entityId) setSelectedVehicleId(entityId);
+    if ((tab === 'vehicles' || tab === 'vehicle_info' || tab === 'vehicle_docs') && entityId) {
+      setSelectedVehicleId(entityId);
+    }
     if (tab === 'trips' && entityId) setSelectedTripId(entityId);
     setActiveTab(tab);
   };
@@ -317,6 +371,17 @@ export const App: React.FC = () => {
         gateStatus={gateStatus}
         onUnlocked={(nextSt) => {
           setGateStatus(nextSt);
+          if (nextSt.activeDisplayName || nextSt.activeCompanyTitle) {
+            setPreferences((prev) => {
+              const next = {
+                ...prev,
+                managerName: nextSt.activeDisplayName || prev.managerName,
+                companyTitle: nextSt.activeCompanyTitle || prev.companyTitle
+              };
+              localStorage.setItem('nd_preferences_v45', JSON.stringify(next));
+              return next;
+            });
+          }
           preloadAllErpData(selectedMonth);
         }}
         darkMode={darkMode}
@@ -382,9 +447,60 @@ export const App: React.FC = () => {
           </div>
         )}
 
+        {/* 1-Month Approaching Vehicle Document Reminder Banner (PC + Android + iOS) */}
+        {docReminderBanner.length > 0 && (
+          <div className="fixed bottom-20 left-3 right-3 sm:left-auto sm:right-6 z-40 max-w-md nd-toast-enter">
+            <div
+              className="p-3.5 rounded-2xl shadow-2xl border-2 space-y-2"
+              style={{
+                backgroundColor: 'var(--surface)',
+                borderColor: 'var(--amber)',
+                backdropFilter: 'blur(12px)'
+              }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black flex items-center gap-1.5" style={{ color: 'var(--amber)' }}>
+                  <AlertCircle size={15} />
+                  <span>Araç Evrak Hatırlatıcısı ({docReminderBanner.length})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDocReminderBanner([])}
+                  className="p-1 rounded-lg nd-layer hover:opacity-80"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="space-y-1 max-h-28 overflow-y-auto">
+                {docReminderBanner.slice(0, 3).map((al) => (
+                  <button
+                    key={al.id}
+                    type="button"
+                    onClick={() => {
+                      handleNavigate(al.targetTab, al.entityId);
+                      setDocReminderBanner([]);
+                    }}
+                    className="w-full text-left p-2 rounded-xl nd-layer hover:opacity-90 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-extrabold truncate">{al.title}</p>
+                      <p className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+                        {al.subtitle}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-black shrink-0" style={{ color: 'var(--accent)' }}>
+                      Aç →
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Module Viewport with GPU-Accelerated Smooth Page Transition */}
         <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-24 md:pb-16">
-          <div key={activeTab} className="nd-page-transition">
+          <div key={`${activeTab}-${cloudRefreshKey}`} className="nd-page-transition">
             {activeTab === 'home' && (
               <HomeModule
                 selectedMonth={selectedMonth}
@@ -452,6 +568,13 @@ export const App: React.FC = () => {
               <VehicleInfoModule
                 highlightVehicleId={selectedVehicleId}
                 onNavigate={handleNavigate}
+              />
+            )}
+
+            {activeTab === 'vehicle_docs' && (
+              <VehicleDocsModule
+                highlightVehicleId={selectedVehicleId || undefined}
+                onDataChanged={refreshGlobalBadges}
               />
             )}
 

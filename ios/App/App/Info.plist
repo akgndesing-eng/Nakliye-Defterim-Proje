@@ -85,5 +85,11 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Araç ruhsatı, ADR belgesi ve sigorta evraklarını yüklemek ve indirmek için fotoğraf arşivi izni gereklidir.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Araç evrak ve ruhsat fotoğraflarını iPhone fotoğraf galerinize kaydetmek için izin gereklidir.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Araç ruhsatı veya evrak fotoğrafını doğrudan kamera ile çekip eklemek için kamera izni gereklidir.</string>
 </dict>
 </plist>

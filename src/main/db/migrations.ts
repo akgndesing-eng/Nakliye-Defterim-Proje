@@ -6,6 +6,47 @@ export interface Migration {
   up: (db: Database.Database) => void;
 }
 
+export const VEHICLE_DOCS_SCHEMA_SQL = `
+-- 12. Araç Evrak Tarihleri & Hatırlatıcı Ayarları
+CREATE TABLE IF NOT EXISTS vehicle_documents (
+    id TEXT PRIMARY KEY,
+    vehicle_id TEXT NOT NULL UNIQUE,
+    traffic_insurance_end DATE,
+    traffic_insurance_remind INTEGER DEFAULT 1,
+    kasko_end DATE,
+    kasko_remind INTEGER DEFAULT 1,
+    inspection_end DATE,
+    inspection_remind INTEGER DEFAULT 1,
+    adr_other_label TEXT DEFAULT 'ADR - Diğer Belge',
+    adr_other_end DATE,
+    adr_other_remind INTEGER DEFAULT 1,
+    hazmat_policy_start DATE,
+    hazmat_policy_start_remind INTEGER DEFAULT 0,
+    hazmat_policy_end DATE,
+    hazmat_policy_end_remind INTEGER DEFAULT 1,
+    reminder_days_before INTEGER DEFAULT 30,
+    extra_info TEXT,
+    extra_docs_json TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+);
+
+-- 13. Araç Evrak Fotoğrafları ve Belgeleri (Plaka Bazlı Sınırsız Dosya)
+CREATE TABLE IF NOT EXISTS vehicle_document_files (
+    id TEXT PRIMARY KEY,
+    vehicle_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    category TEXT DEFAULT 'ruhsat',
+    file_name TEXT NOT NULL,
+    mime_type TEXT DEFAULT 'image/jpeg',
+    file_size INTEGER DEFAULT 0,
+    data_url TEXT NOT NULL,
+    cloud_key TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+);
+`;
+
 export const V45_SCHEMA_SQL = `
 -- 1. Araçlar ve Tankerler
 CREATE TABLE IF NOT EXISTS vehicles (
@@ -161,7 +202,7 @@ CREATE TABLE IF NOT EXISTS village_tanker_logs (
     notes TEXT,
     FOREIGN KEY (tanker_id) REFERENCES village_tankers(id) ON DELETE CASCADE
 );
-`;
+` + VEHICLE_DOCS_SCHEMA_SQL;
 
 export const migrations: Migration[] = [
   {
@@ -478,6 +519,13 @@ export const migrations: Migration[] = [
         'EROL BULUT',
         'ÖNCEKİ AYDAN KALAN VERESİYELERİN ÖDEMESİNİN ALINMASI'
       );
+    }
+  },
+  {
+    version: 5,
+    name: 'v45_vehicle_documents_and_files',
+    up: (db: Database.Database) => {
+      db.exec(VEHICLE_DOCS_SCHEMA_SQL);
     }
   }
 ];

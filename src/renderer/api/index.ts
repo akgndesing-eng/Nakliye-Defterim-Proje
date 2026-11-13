@@ -1,5 +1,6 @@
 import { ElectronApi } from '../../preload/preload';
 import { mobileStorageApi } from './mobileStorage';
+import { scheduleCloudPush } from './cloudSync';
 
 declare global {
   interface Window {
@@ -26,12 +27,23 @@ export function clearErpCache(): void {
   }
 }
 
+function onErpMutation(): void {
+  clearErpCache();
+  scheduleCloudPush();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('nd-cloud-sync-updated', () => {
+    clearErpCache();
+  });
+}
+
 // When running inside Electron on desktop, window.api is injected via preload.
 // When running inside Capacitor APK on Android / mobile, mobileStorageApi provides
 // full offline AES-256 encrypted local persistence.
 const rawApi: ElectronApi = window.api || mobileStorageApi;
 
-// Wrapped API that automatically caches reads and invalidates on writes
+// Wrapped API that automatically caches reads, invalidates on writes, and pushes to Cloud Sync
 export const api: ElectronApi = {
   ...rawApi,
   getDashboard: async (selectedMonth?: string) => {
@@ -51,12 +63,12 @@ export const api: ElectronApi = {
   },
   saveVehicle: async (data: any) => {
     const res = await rawApi.saveVehicle(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteVehicle: async (id: string) => {
     const res = await rawApi.deleteVehicle(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getVehicleExpenses: async (filters?: { month?: string; vehicleId?: string }) => {
@@ -66,12 +78,12 @@ export const api: ElectronApi = {
   },
   saveVehicleExpense: async (data: any) => {
     const res = await rawApi.saveVehicleExpense(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteVehicleExpense: async (id: string) => {
     const res = await rawApi.deleteVehicleExpense(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getDrivers: async () => {
@@ -81,12 +93,12 @@ export const api: ElectronApi = {
   },
   saveDriver: async (data: any) => {
     const res = await rawApi.saveDriver(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteDriver: async (id: string) => {
     const res = await rawApi.deleteDriver(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getCustomers: async () => {
@@ -96,17 +108,17 @@ export const api: ElectronApi = {
   },
   saveCustomer: async (data: any) => {
     const res = await rawApi.saveCustomer(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteCustomer: async (id: string) => {
     const res = await rawApi.deleteCustomer(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   addCustomerTransaction: async (payload: any) => {
     const res = await rawApi.addCustomerTransaction(payload);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getTrips: async (month?: string) => {
@@ -116,17 +128,17 @@ export const api: ElectronApi = {
   },
   saveTrip: async (payload: any) => {
     const res = await rawApi.saveTrip(payload);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   updateTripStatus: async (tripId: string, status: string, invoiceStatus?: number) => {
     const res = await rawApi.updateTripStatus(tripId, status, invoiceStatus);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteTrip: async (tripId: string) => {
     const res = await rawApi.deleteTrip(tripId);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getStops: async (onlyOpen?: boolean) => {
@@ -136,7 +148,7 @@ export const api: ElectronApi = {
   },
   collectStopPayment: async (payload: any) => {
     const res = await rawApi.collectStopPayment(payload);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getTasks: async () => {
@@ -146,17 +158,17 @@ export const api: ElectronApi = {
   },
   saveTask: async (data: any) => {
     const res = await rawApi.saveTask(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   toggleTaskStatus: async (id: string) => {
     const res = await rawApi.toggleTaskStatus(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteTask: async (id: string) => {
     const res = await rawApi.deleteTask(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getReminderNotes: async () => {
@@ -166,17 +178,17 @@ export const api: ElectronApi = {
   },
   saveReminderNote: async (data: any) => {
     const res = await rawApi.saveReminderNote(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   toggleReminderNote: async (id: string) => {
     const res = await rawApi.toggleReminderNote(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteReminderNote: async (id: string) => {
     const res = await rawApi.deleteReminderNote(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getMonthlyReports: async () => {
@@ -201,12 +213,12 @@ export const api: ElectronApi = {
   },
   saveVillageTanker: async (data: any) => {
     const res = await rawApi.saveVillageTanker(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteVillageTanker: async (id: string) => {
     const res = await rawApi.deleteVillageTanker(id);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   getVillageTankerLogs: async (tankerId?: string) => {
@@ -216,13 +228,49 @@ export const api: ElectronApi = {
   },
   saveVillageTankerLog: async (data: any) => {
     const res = await rawApi.saveVillageTankerLog(data);
-    clearErpCache();
+    onErpMutation();
     return res;
   },
   deleteVillageTankerLog: async (id: string) => {
     const res = await rawApi.deleteVillageTankerLog(id);
-    clearErpCache();
+    onErpMutation();
     return res;
+  },
+  getVehicleDocuments: async (vehicleId?: string) => {
+    const res = await rawApi.getVehicleDocuments(vehicleId);
+    setCached(`vehicleDocs:${vehicleId || 'all'}`, res);
+    return res;
+  },
+  saveVehicleDocument: async (data: any) => {
+    const res = await rawApi.saveVehicleDocument(data);
+    onErpMutation();
+    return res;
+  },
+  deleteVehicleDocument: async (id: string) => {
+    const res = await rawApi.deleteVehicleDocument(id);
+    onErpMutation();
+    return res;
+  },
+  getVehicleDocumentFiles: async (vehicleId?: string) => {
+    const res = await rawApi.getVehicleDocumentFiles(vehicleId);
+    setCached(`vehicleDocFiles:${vehicleId || 'all'}`, res);
+    return res;
+  },
+  saveVehicleDocumentFile: async (data: any) => {
+    const res = await rawApi.saveVehicleDocumentFile(data);
+    onErpMutation();
+    return res;
+  },
+  deleteVehicleDocumentFile: async (id: string) => {
+    const res = await rawApi.deleteVehicleDocumentFile(id);
+    onErpMutation();
+    return res;
+  },
+  showOsNotification: async (title: string, body: string) => {
+    return rawApi.showOsNotification(title, body);
+  },
+  saveDocumentFile: async (fileName: string, dataUrl: string) => {
+    return rawApi.saveDocumentFile(fileName, dataUrl);
   }
 };
 
@@ -232,6 +280,8 @@ export async function preloadAllErpData(selectedMonth: string): Promise<void> {
     await Promise.all([
       api.getDashboard(selectedMonth),
       api.getVehicles(),
+      api.getVehicleDocuments(),
+      api.getVehicleDocumentFiles(),
       api.getCustomers(),
       api.getDrivers(),
       api.getTrips(),
